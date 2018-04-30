@@ -17,6 +17,7 @@
 package core
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/consensus"
@@ -48,6 +49,7 @@ func (c *core) sendPreprepare(request *istanbul.Request) {
 func (c *core) handlePreprepare(msg *message, src istanbul.Validator) error {
 	logger := c.logger.New("from", src, "state", c.state)
 
+	logger.Info(fmt.Sprintf("====>Pre-prepare: round - %v, seq - %v", c.current.Round(), c.current.Sequence()))
 	// Decode PRE-PREPARE
 	var preprepare *istanbul.Preprepare
 	err := msg.Decode(&preprepare)
@@ -93,6 +95,7 @@ func (c *core) handlePreprepare(msg *message, src istanbul.Validator) error {
 				})
 			})
 		} else {
+			logger.Info("====>Pre-prepare: failed to verify proposal, calling sendNextRoundChange. round - %v, seq - %v", c.current.Round(), c.current.Sequence())
 			c.sendNextRoundChange()
 		}
 		return err
@@ -109,6 +112,7 @@ func (c *core) handlePreprepare(msg *message, src istanbul.Validator) error {
 				c.sendCommit()
 			} else {
 				// Send round change
+				logger.Info("====>Pre-prepare: proposed hash not matching current locked hash. round - %v, seq - %v", c.current.Round(), c.current.Sequence())
 				c.sendNextRoundChange()
 			}
 		} else {

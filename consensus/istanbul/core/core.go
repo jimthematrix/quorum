@@ -173,6 +173,8 @@ func (c *core) commit() {
 
 		if err := c.backend.Commit(proposal, committedSeals); err != nil {
 			c.current.UnlockHash() //Unlock block when insertion fails
+			logger := c.logger.New("state", c.state)
+			logger.Info("====>Commit failed: calling sendNextRoundChange")
 			c.sendNextRoundChange()
 			return
 		}
@@ -325,6 +327,8 @@ func (c *core) newRoundChangeTimer() {
 	}
 
 	c.roundChangeTimer = time.AfterFunc(timeout, func() {
+		logger := c.logger.New("old_round", c.current.Round(), "old_seq", c.current.Sequence())
+		logger.Info("====>Round change timer: triggered")
 		c.sendEvent(timeoutEvent{})
 	})
 }

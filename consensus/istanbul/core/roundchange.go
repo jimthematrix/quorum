@@ -17,6 +17,7 @@
 package core
 
 import (
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -67,6 +68,7 @@ func (c *core) sendRoundChange(round *big.Int) {
 
 func (c *core) handleRoundChange(msg *message, src istanbul.Validator) error {
 	logger := c.logger.New("state", c.state, "from", src.Address().Hex())
+	logger.Info(fmt.Sprintf("====>Round change: round - %v, seq - %v", c.current.Round(), c.current.Sequence()))
 
 	// Decode ROUND CHANGE message
 	var rc *istanbul.Subject

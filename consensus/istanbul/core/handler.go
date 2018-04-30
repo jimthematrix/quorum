@@ -194,9 +194,10 @@ func (c *core) handleTimeoutMsg() {
 
 	lastProposal, _ := c.backend.LastProposal()
 	if lastProposal != nil && lastProposal.Number().Cmp(c.current.Sequence()) >= 0 {
-		c.logger.Trace("round change timeout, catch up latest sequence", "number", lastProposal.Number().Uint64())
+		c.logger.Info("====>round change timeout, catch up latest sequence", "number", lastProposal.Number().Uint64())
 		c.startNewRound(common.Big0)
 	} else {
+		c.logger.Info("====>no more proposals in this round, calling sendNextRoundChange. round - %v, seq - %v", c.current.Round(), c.current.Sequence())
 		c.sendNextRoundChange()
 	}
 }
