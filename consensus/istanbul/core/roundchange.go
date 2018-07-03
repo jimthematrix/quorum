@@ -68,7 +68,6 @@ func (c *core) sendRoundChange(round *big.Int) {
 
 func (c *core) handleRoundChange(msg *message, src istanbul.Validator) error {
 	logger := c.logger.New("state", c.state, "from", src.Address().Hex())
-	logger.Info(fmt.Sprintf("====>Round change: round - %v, seq - %v", c.current.Round(), c.current.Sequence()))
 
 	// Decode ROUND CHANGE message
 	var rc *istanbul.Subject
@@ -97,15 +96,18 @@ func (c *core) handleRoundChange(msg *message, src istanbul.Validator) error {
 	// try to catch up the round number.
 	if c.waitingForRoundChange && num == int(c.valSet.F()+1) {
 		if cv.Round.Cmp(roundView.Round) < 0 {
+			logger.Info(fmt.Sprintf("====>Round change after f+1 messages: round - %v, seq - %v", c.current.Round(), c.current.Sequence()))
 			c.sendRoundChange(roundView.Round)
 		}
 		return nil
 	} else if num == int(2*c.valSet.F()+1) && (c.waitingForRoundChange || cv.Round.Cmp(roundView.Round) < 0) {
 		// We've received 2f+1 ROUND CHANGE messages, start a new round immediately.
+		logger.Info(fmt.Sprintf("====>Round change after 2f+1 messages: round - %v, seq - %v", c.current.Round(), c.current.Sequence()))
 		c.startNewRound(roundView.Round)
 		return nil
 	} else if cv.Round.Cmp(roundView.Round) < 0 {
 		// Only gossip the message with current round to other validators.
+		logger.Info(fmt.Sprintf("====>No round change, relaying message: round - %v, seq - %v", c.current.Round(), c.current.Sequence()))
 		return errIgnored
 	}
 	return nil
