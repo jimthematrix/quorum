@@ -229,7 +229,7 @@ var (
 		Value: core.DefaultTxPoolConfig.Rejournal,
 	}
 	TxPoolSizeLimitFlag = cli.Uint64Flag{
-		Name:  "txpool.sizelimit",
+		Name:  "txsizelimit",
 		Usage: "Maximum size allowed for valid transaction (in KB)",
 		Value: 32,
 	}
