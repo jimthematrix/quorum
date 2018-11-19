@@ -271,12 +271,6 @@ func TestInvalidTransactions(t *testing.T) {
 		t.Error("expected", ErrOversizedData, "; got", err)
 	}
 
-	config.SizeLimit = 34
-	pool3 := NewTxPool(config, params.TestChainConfig, blockchain)
-	if err := pool3.AddRemote(tx3); err != nil {
-		t.Error("expected error to be nil; got", err)
-	}
-
 	tx4, _ := types.SignTx(types.NewTransaction(1, common.Address{}, big.NewInt(100), common.Big0, big.NewInt(0), nil), types.HomesteadSigner{}, key)
 	balance = new(big.Int).Add(tx4.Value(), new(big.Int).Mul(tx4.Gas(), tx4.GasPrice()))
 	from, _ = deriveSender(tx4)
