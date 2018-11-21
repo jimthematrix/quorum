@@ -165,7 +165,7 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 		log.Warn("Sanitizing invalid txpool journal time", "provided", conf.Rejournal, "updated", time.Second)
 		conf.Rejournal = time.Second
 	}
-	if conf.SizeLimit < 32 {
+	if conf.SizeLimit < 32 || conf.SizeLimit > 128 {
 		log.Warn("Sanitizing invalid txpool size limit", "provided", conf.SizeLimit, "updated", DefaultTxPoolConfig.SizeLimit)
 		conf.SizeLimit = DefaultTxPoolConfig.SizeLimit
 	}
@@ -566,7 +566,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		return ErrInvalidGasPrice
 	}
 	// Reject transactions over 32KB (or manually set limit) to prevent DOS attacks
-	if uint64(tx.Size()) > pool.config.SizeLimit*1024 {
+	if float64(tx.Size()) > float64(pool.config.SizeLimit*1024) {
 		return ErrOversizedData
 	}
 	// Transactions can't be negative. This may never happen using RLP decoded
