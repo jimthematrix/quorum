@@ -722,7 +722,7 @@ func (srv *Server) SetupConn(fd net.Conn, flags connFlag, dialDest *discover.Nod
 
 	//START - QUORUM Permissioning
 	currentNode := srv.NodeInfo().ID
-	cnodeName := srv.NodeInfo().Name
+	// cnodeName := srv.NodeInfo().Name
 	// log.Debug("Quorum permissioning",
 	// 	"EnableNodePermission", srv.EnableNodePermission,
 	// 	"DataDir", srv.DataDir,
