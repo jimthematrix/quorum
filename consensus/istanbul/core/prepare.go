@@ -40,7 +40,6 @@ func (c *core) sendPrepare() {
 
 func (c *core) handlePrepare(msg *message, src istanbul.Validator) error {
 	logger := c.logger.New("from", src, "state", c.state)
-	logger.Info(fmt.Sprintf("====>Prepare: round - %v, seq - %v", c.current.Round(), c.current.Sequence()))
 	// Decode PREPARE message
 	var prepare *istanbul.Subject
 	err := msg.Decode(&prepare)
