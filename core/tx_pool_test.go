@@ -259,24 +259,13 @@ func TestInvalidTransactions(t *testing.T) {
 		t.Error("expected", ErrOversizedData, "; got", err)
 	}
 
-	db, _ := ethdb.NewMemDatabase()
-	statedb, _ := state.New(common.Hash{}, state.NewDatabase(db))
-	blockchain := &testBlockChain{statedb, big.NewInt(1000000), new(event.Feed)}
-	config := testTxPoolConfig
-	config.SizeLimit = 33
-	pool2 := NewTxPool(config, params.TestChainConfig, blockchain)
-	data2 := make([]byte, (33*1024)+1)
-	tx3, _ := types.SignTx(types.NewTransaction(2, common.Address{}, big.NewInt(100), big.NewInt(100000), big.NewInt(1), data2), types.HomesteadSigner{}, key)
-	if err := pool2.AddRemote(tx3); err != ErrOversizedData {
-		t.Error("expected", ErrOversizedData, "; got", err)
-	}
+	tx3, _ := types.SignTx(types.NewTransaction(1, common.Address{}, big.NewInt(100), common.Big0, big.NewInt(0), nil), types.HomesteadSigner{}, key)
 
-	tx4, _ := types.SignTx(types.NewTransaction(1, common.Address{}, big.NewInt(100), common.Big0, big.NewInt(0), nil), types.HomesteadSigner{}, key)
-	balance = new(big.Int).Add(tx4.Value(), new(big.Int).Mul(tx4.Gas(), tx4.GasPrice()))
-	from, _ = deriveSender(tx4)
+	balance = new(big.Int).Add(tx3.Value(), new(big.Int).Mul(tx3.Gas(), tx3.GasPrice()))
+	from, _ = deriveSender(tx3)
 	pool.currentState.AddBalance(from, balance)
-	tx4.SetPrivate()
-	if err := pool.AddRemote(tx4); err != ErrEtherValueUnsupported {
+	tx3.SetPrivate()
+	if err := pool.AddRemote(tx3); err != ErrEtherValueUnsupported {
 		t.Error("expected", ErrEtherValueUnsupported, "; got", err)
 	}
 }
