@@ -17,7 +17,6 @@
 package core
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/consensus"

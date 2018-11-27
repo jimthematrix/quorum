@@ -17,7 +17,6 @@
 package core
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/ethereum/go-ethereum/consensus/istanbul"
@@ -39,7 +38,6 @@ func (c *core) sendPrepare() {
 }
 
 func (c *core) handlePrepare(msg *message, src istanbul.Validator) error {
-	logger := c.logger.New("from", src, "state", c.state)
 	// Decode PREPARE message
 	var prepare *istanbul.Subject
 	err := msg.Decode(&prepare)
