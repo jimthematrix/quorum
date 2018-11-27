@@ -17,7 +17,6 @@
 package core
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -52,7 +51,6 @@ func (c *core) broadcastCommit(sub *istanbul.Subject) {
 }
 
 func (c *core) handleCommit(msg *message, src istanbul.Validator) error {
-	logger := c.logger.New("from", src, "state", c.state)
 	// Decode COMMIT message
 	var commit *istanbul.Subject
 	err := msg.Decode(&commit)
