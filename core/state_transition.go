@@ -187,7 +187,9 @@ func (st *StateTransition) buyGas() error {
 	if state.GetBalance(sender.Address()).Cmp(mgval) < 0 {
 		return errInsufficientBalanceForGas
 	}
+	log.Info("======== Attempting to subtract gas", "gasToSubtract", mgas, "gaspool", st.gp.String())
 	if err := st.gp.SubGas(mgas); err != nil {
+		log.Info("======== Subtraction failed!!!", "err", err)
 		return err
 	}
 	st.gas += mgas.Uint64()
@@ -247,8 +249,10 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 		data = st.data
 	}
 
-	// Pay intrinsic gas
-	// TODO convert to uint64
+	// Pay intrinsic gas. For a private contract this is done using the public hash passed in,
+	// not the private data retrieved above. This is because we need any (participant) validator
+	// node to get the same result as a (non-participant) minter node, to avoid out-of-gas issues.
+	log.Info("======== remaining gas prior to IntrinsicGas()", "gas", st.gas)
 	intrinsicGas := IntrinsicGas(data, contractCreation, homestead)
 	if intrinsicGas.BitLen() > 64 {
 		return nil, nil, nil, false, vm.ErrOutOfGas
@@ -256,8 +260,10 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 	if err = st.useGas(intrinsicGas.Uint64()); err != nil {
 		return nil, nil, nil, false, err
 	}
+	log.Info("======== remaining gas after IntrinsicGas()", "gas", st.gas)
 
 	var (
+		leftoverGas uint64
 		evm = st.evm
 		// vm errors do not effect consensus and are therefor
 		// not assigned to err, except for insufficient balance
@@ -265,7 +271,7 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 		vmerr error
 	)
 	if contractCreation {
-		ret, _, st.gas, vmerr = evm.Create(sender, data, st.gas, st.value)
+		ret, _, leftoverGas, vmerr = evm.Create(sender, data, st.gas, st.value)
 	} else {
 		// Increment the account nonce only if the transaction isn't private.
 		// If the transaction is private it has already been incremented on
@@ -283,7 +289,7 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 		if len(data) == 0 && isPrivate{
 			return nil, new(big.Int), new(big.Int), false, nil
 		}
-		ret, st.gas, vmerr = evm.Call(sender, to, data, st.gas, st.value)
+		ret, leftoverGas, vmerr = evm.Call(sender, to, data, st.gas, st.value)
 	}
 	if vmerr != nil {
 		log.Debug("VM returned with error", "err", vmerr)
@@ -296,8 +302,19 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 	}
 	requiredGas = new(big.Int).Set(st.gasUsed())
 
+	//Pay gas used during contract creation or execution (st.gas tracks remaining gas)
+	//However, if private contract then we don't want to do this else we could
+	//have a mismatch between a (non-participant) minter and (participant) validator,
+	//which can cause a 'BAD BLOCK' crash.
+	if !isPrivate {
+		st.gas = leftoverGas
+		log.Info("======== setting leftoverGas for public transaction after Create or Call", "gas", st.gas)
+	}
+	log.Info("======== left over gas to be refunded", "gas", st.gas)
+
 	st.refundGas()
 	st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(st.gasUsed(), st.gasPrice))
+	log.Info("======== remaining gas after refundGas()", "gas", st.gas)
 
 	if isPrivate {
 		return ret, new(big.Int), new(big.Int), vmerr != nil, err
