@@ -249,8 +249,10 @@ func (c *core) startNewRound(round *big.Int) {
 			r := &istanbul.Request{
 				Proposal: c.current.Proposal(), //c.current.Proposal would be the locked proposal by previous proposer, see updateRoundState
 			}
+			logger.Info("Sending Pre-prepare for the locked proposal", "hash", c.current.Proposal().Hash())
 			c.sendPreprepare(r)
 		} else if c.current.pendingRequest != nil {
+			logger.Info("Sending Pre-prepare for the pending request", "hash", c.current.pendingRequest.Proposal.Hash())
 			c.sendPreprepare(c.current.pendingRequest)
 		}
 	}
