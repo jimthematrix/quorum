@@ -17,6 +17,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/istanbul"
 )
@@ -197,7 +199,7 @@ func (c *core) handleTimeoutMsg() {
 		c.logger.Info("====>round change timeout, catch up latest sequence", "number", lastProposal.Number().Uint64())
 		c.startNewRound(common.Big0)
 	} else {
-		c.logger.Info("====>no more proposals in this round, calling sendNextRoundChange. round - %v, seq - %v", c.current.Round(), c.current.Sequence())
+		c.logger.Info(fmt.Sprintf("====>no more proposals in this round, calling sendNextRoundChange. round - %v, seq - %v", c.current.Round(), c.current.Sequence()))
 		c.sendNextRoundChange()
 	}
 }
