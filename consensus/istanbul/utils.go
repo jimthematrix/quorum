@@ -56,5 +56,6 @@ func CheckValidatorSignature(valSet ValidatorSet, data []byte, sig []byte) (comm
 		return val.Address(), nil
 	}
 
+	log.Error("Signer does not belong to the validator set", "signer", signer)
 	return common.Address{}, ErrUnauthorizedAddress
 }
