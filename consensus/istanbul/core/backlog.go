@@ -83,7 +83,7 @@ func (c *core) storeBacklog(msg *message, src istanbul.Validator) {
 		return
 	}
 
-	logger.Trace("Store future message")
+	logger.Debug("Store future message", "message", msg)
 
 	c.backlogsMu.Lock()
 	defer c.backlogsMu.Unlock()
@@ -125,7 +125,7 @@ func (c *core) processBacklog() {
 			delete(c.backlogs, srcAddress)
 			continue
 		}
-		logger := c.logger.New("from", src, "state", c.state)
+		logger := c.logger.New("Processing backlog", "from", src, "state", c.state)
 		isFuture := false
 
 		// We stop processing if
@@ -166,7 +166,7 @@ func (c *core) processBacklog() {
 				logger.Trace("Skip the backlog event", "msg", msg, "err", err)
 				continue
 			}
-			logger.Trace("Post backlog event", "msg", msg)
+			logger.Debug("Post backlog event", "msg", msg)
 
 			go c.sendEvent(backlogEvent{
 				src: src,

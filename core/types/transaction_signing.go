@@ -24,6 +24,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -43,10 +44,13 @@ func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
 	var signer Signer
 	switch {
 	case config.IsEIP155(blockNumber):
+		log.Info("==== is EIP155", "block", blockNumber)
 		signer = NewEIP155Signer(config.ChainId)
 	case config.IsHomestead(blockNumber):
+		log.Info("==== is Homestead", "block", blockNumber)
 		signer = HomesteadSigner{}
 	default:
+		log.Info("==== is Frontier", "block", blockNumber)
 		signer = FrontierSigner{}
 	}
 	return signer

@@ -54,6 +54,7 @@ func (sb *backend) HandleMsg(addr common.Address, msg p2p.Msg) (bool, error) {
 			return true, istanbul.ErrStoppedEngine
 		}
 
+		sb.logger.Debug("Handling Istanbul message", "message", msg)
 		var data []byte
 		if err := msg.Decode(&data); err != nil {
 			return true, errDecodeFailed

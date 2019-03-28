@@ -62,6 +62,8 @@ func New(config *istanbul.Config, privateKey *ecdsa.PrivateKey, db ethdb.Databas
 		knownMessages:    knownMessages,
 	}
 	backend.core = istanbulCore.New(backend, backend.config)
+
+	backend.logger.Debug("New instance of Istanbul backend")
 	return backend
 }
 
@@ -112,6 +114,7 @@ func (sb *backend) Validators(proposal istanbul.Proposal) istanbul.ValidatorSet 
 
 // Broadcast implements istanbul.Backend.Broadcast
 func (sb *backend) Broadcast(valSet istanbul.ValidatorSet, payload []byte) error {
+	sb.logger.Debug("Broadcasting to other validators", "valSet", valSet);
 	// send to others
 	sb.Gossip(valSet, payload)
 	// send to self
@@ -152,6 +155,7 @@ func (sb *backend) Gossip(valSet istanbul.ValidatorSet, payload []byte) error {
 			m.Add(hash, true)
 			sb.recentMessages.Add(addr, m)
 
+			sb.logger.Debug("Gossiping message to other peers", "peer", addr)
 			go p.Send(istanbulMsg, payload)
 		}
 	}
@@ -234,11 +238,14 @@ func (sb *backend) Verify(proposal istanbul.Proposal) (time.Duration, error) {
 	} else if err == consensus.ErrFutureBlock {
 		return time.Unix(block.Header().Time.Int64(), 0).Sub(now()), consensus.ErrFutureBlock
 	}
+
+	sb.logger.Debug("Verified proposed block", "block hash", block.Hash())
 	return 0, err
 }
 
 // Sign implements istanbul.Backend.Sign
 func (sb *backend) Sign(data []byte) ([]byte, error) {
+	sb.logger.Debug("Signing data");
 	hashData := crypto.Keccak256([]byte(data))
 	return crypto.Sign(hashData, sb.privateKey)
 }
@@ -274,7 +281,9 @@ func (sb *backend) GetProposer(number uint64) common.Address {
 // ParentValidators implements istanbul.Backend.GetParentValidators
 func (sb *backend) ParentValidators(proposal istanbul.Proposal) istanbul.ValidatorSet {
 	if block, ok := proposal.(*types.Block); ok {
-		return sb.getValidators(block.Number().Uint64()-1, block.ParentHash())
+		ret := sb.getValidators(block.Number().Uint64()-1, block.ParentHash())
+		sb.logger.Debug("Parent validators", "validators", ret)
+		return ret
 	}
 	return validator.NewSet(nil, sb.config.ProposerPolicy)
 }

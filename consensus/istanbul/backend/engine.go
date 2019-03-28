@@ -346,6 +346,7 @@ func (sb *backend) Prepare(chain consensus.ChainReader, header *types.Header) er
 			addresses = append(addresses, address)
 			authorizes = append(authorizes, authorize)
 		}
+		sb.logger.Debug("candidates list", "address", address, "authorize", authorize)
 	}
 	sb.candidatesLock.RUnlock()
 
@@ -361,6 +362,7 @@ func (sb *backend) Prepare(chain consensus.ChainReader, header *types.Header) er
 		}
 	}
 
+	sb.logger.Debug("adding validators from parent block to proposed block", "validators", snap.validators())
 	// add validators in snapshot to extraData's validators section
 	extra, err := prepareExtra(header, snap.validators())
 	if err != nil {
@@ -388,6 +390,7 @@ func (sb *backend) Finalize(chain consensus.ChainReader, header *types.Header, s
 	header.UncleHash = nilUncleHash
 
 	// Assemble and return the final block for sealing
+	sb.logger.Debug("Finalizing block", "block hash", header.Hash())
 	return types.NewBlock(header, txs, nil, receipts), nil
 }
 
@@ -503,6 +506,7 @@ func (sb *backend) Start(chain consensus.ChainReader, currentBlock func() *types
 		return err
 	}
 
+	sb.logger.Debug("Started Istanbul Engine")
 	sb.coreStarted = true
 	return nil
 }
@@ -517,6 +521,7 @@ func (sb *backend) Stop() error {
 	if err := sb.core.Stop(); err != nil {
 		return err
 	}
+	sb.logger.Debug("Stopped Istanbul Engine")
 	sb.coreStarted = false
 	return nil
 }

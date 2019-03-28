@@ -132,6 +132,7 @@ func (c *core) finalizeMessage(msg *message) ([]byte, error) {
 func (c *core) broadcast(msg *message) {
 	logger := c.logger.New("state", c.state)
 
+	logger.Debug("Broadcasting message", "message", msg)
 	payload, err := c.finalizeMessage(msg)
 	if err != nil {
 		logger.Error("Failed to finalize message", "msg", msg, "err", err)
@@ -194,7 +195,7 @@ func (c *core) startNewRound(round *big.Int) {
 	// Try to get last proposal
 	lastProposal, lastProposer := c.backend.LastProposal()
 	if c.current == nil {
-		logger.Trace("Start to the initial round")
+		logger.Debug("Start to the initial round")
 	} else if lastProposal.Number().Cmp(c.current.Sequence()) >= 0 {
 		diff := new(big.Int).Sub(lastProposal.Number(), c.current.Sequence())
 		c.sequenceMeter.Mark(new(big.Int).Add(diff, common.Big1).Int64())
@@ -203,7 +204,7 @@ func (c *core) startNewRound(round *big.Int) {
 			c.consensusTimer.UpdateSince(c.consensusTimestamp)
 			c.consensusTimestamp = time.Time{}
 		}
-		logger.Trace("Catch up latest proposal", "number", lastProposal.Number().Uint64(), "hash", lastProposal.Hash())
+		logger.Debug("Catch up latest proposal", "number", lastProposal.Number().Uint64(), "hash", lastProposal.Hash())
 	} else if lastProposal.Number().Cmp(big.NewInt(c.current.Sequence().Int64()-1)) == 0 {
 		if round.Cmp(common.Big0) == 0 {
 			// same seq and round, don't need to start new round
@@ -328,6 +329,8 @@ func (c *core) newRoundChangeTimer() {
 		timeout += time.Duration(math.Pow(2, float64(round))) * time.Second
 	}
 
+	logger1 := c.logger.New("old_round", c.current.Round(), "old_seq", c.current.Sequence())
+	logger1.Debug("newRoundChangeTimer")
 	c.roundChangeTimer = time.AfterFunc(timeout, func() {
 		logger := c.logger.New("old_round", c.current.Round(), "old_seq", c.current.Sequence())
 		logger.Info("====>Round change timer: triggered")

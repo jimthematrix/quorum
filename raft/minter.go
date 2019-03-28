@@ -19,6 +19,7 @@ package raft
 import (
 	"fmt"
 	"math/big"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -106,6 +107,7 @@ func newMinter(config *params.ChainConfig, eth *RaftService, blockTime time.Dura
 
 func (minter *minter) start() {
 	atomic.StoreInt32(&minter.minting, 1)
+	log.Info("====== minter started, requesting minting")
 	minter.requestMinting()
 }
 
@@ -121,6 +123,8 @@ func (minter *minter) stop() {
 // requested. Due to the use of a RingChannel, this function is idempotent if
 // called multiple times before the minting occurs.
 func (minter *minter) requestMinting() {
+	log.Info("====== minting requested: ")
+	debug.PrintStack()
 	minter.shouldMine.In() <- struct{}{}
 }
 
@@ -130,6 +134,7 @@ func (minter *minter) updateSpeculativeChainPerNewHead(newHeadBlock *types.Block
 	minter.mu.Lock()
 	defer minter.mu.Unlock()
 
+	log.Info("====== updateSpeculativeChainPerNewHead")
 	minter.speculativeChain.accept(newHeadBlock)
 }
 
@@ -161,6 +166,7 @@ func (minter *minter) eventLoop() {
 			newHeadBlock := ev.Block
 
 			if atomic.LoadInt32(&minter.minting) == 1 {
+				log.Info("====== message received from chainHead channel")
 				minter.updateSpeculativeChainPerNewHead(newHeadBlock)
 
 				//
@@ -178,6 +184,7 @@ func (minter *minter) eventLoop() {
 
 		case <-minter.txPreChan:
 			if atomic.LoadInt32(&minter.minting) == 1 {
+				log.Info("====== message received from txPre channel")
 				minter.requestMinting()
 			}
 
@@ -283,11 +290,14 @@ func (minter *minter) createWork() *work {
 
 func (minter *minter) getTransactions() *types.TransactionsByPriceAndNonce {
 	allAddrTxes, err := minter.eth.TxPool().Pending()
+	log.Info("====== getTransactions", "allAddrTxes", allAddrTxes)
 	if err != nil { // TODO: handle
 		panic(err)
 	}
 	addrTxes := minter.speculativeChain.withoutProposedTxes(allAddrTxes)
-	signer := types.MakeSigner(minter.chain.Config(), minter.chain.CurrentBlock().Number())
+	blockNumber := minter.chain.CurrentBlock().Number()
+	blockNumber.Add(blockNumber, big.NewInt(1))
+	signer := types.MakeSigner(minter.chain.Config(), blockNumber)
 	return types.NewTransactionsByPriceAndNonce(signer, addrTxes)
 }
 
@@ -310,6 +320,8 @@ func (minter *minter) mintNewBlock() {
 	minter.mu.Lock()
 	defer minter.mu.Unlock()
 
+	log.Info("====== mintNewBlock")
+	debug.PrintStack()
 	work := minter.createWork()
 	transactions := minter.getTransactions()
 

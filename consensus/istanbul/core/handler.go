@@ -90,6 +90,7 @@ func (c *core) handleEvents() {
 			// A real event arrived, process interesting content
 			switch ev := event.Data.(type) {
 			case istanbul.RequestEvent:
+				c.logger.Debug("Istanbul Request event", "event", ev)
 				r := &istanbul.Request{
 					Proposal: ev.Proposal,
 				}
@@ -98,11 +99,13 @@ func (c *core) handleEvents() {
 					c.storeRequestMsg(r)
 				}
 			case istanbul.MessageEvent:
+				c.logger.Debug("Istanbul Message event", "event", ev)
 				if err := c.handleMsg(ev.Payload); err == nil {
 					c.backend.Gossip(c.valSet, ev.Payload)
 				}
 			case backlogEvent:
 				// No need to check signature for internal messages
+				c.logger.Debug("Istanbul backlog event", "message", ev.msg, "from", ev.src)
 				if err := c.handleCheckedMsg(ev.msg, ev.src); err == nil {
 					p, err := ev.msg.Payload()
 					if err != nil {
@@ -168,12 +171,16 @@ func (c *core) handleCheckedMsg(msg *message, src istanbul.Validator) error {
 
 	switch msg.Code {
 	case msgPreprepare:
+		logger.Debug("Pre-prepare message received", "from", src)
 		return testBacklog(c.handlePreprepare(msg, src))
 	case msgPrepare:
+		logger.Debug("Prepare message received", "from", src)
 		return testBacklog(c.handlePrepare(msg, src))
 	case msgCommit:
+		logger.Debug("Commit message received", "from", src)
 		return testBacklog(c.handleCommit(msg, src))
 	case msgRoundChange:
+		logger.Debug("Round change message received", "from", src)
 		return testBacklog(c.handleRoundChange(msg, src))
 	default:
 		logger.Error("Invalid message", "msg", msg)

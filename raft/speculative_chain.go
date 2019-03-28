@@ -168,12 +168,14 @@ func (chain *speculativeChain) withoutProposedTxes(addrTxes AddressTxes) Address
 	newMap := make(AddressTxes)
 
 	for addr, txes := range addrTxes {
+		log.Info("====== processing txs for addr", "address", addr, "txs", txes)
 		filteredTxes := make(types.Transactions, 0)
 		for _, tx := range txes {
 			if !chain.proposedTxes.Has(tx.Hash()) {
 				filteredTxes = append(filteredTxes, tx)
 			}
 		}
+		log.Info("====== filtered txs for addr", "address", addr, "txs", filteredTxes)
 		if len(filteredTxes) > 0 {
 			newMap[addr] = filteredTxes
 		}
