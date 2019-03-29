@@ -187,9 +187,7 @@ func (st *StateTransition) buyGas() error {
 	if state.GetBalance(sender.Address()).Cmp(mgval) < 0 {
 		return errInsufficientBalanceForGas
 	}
-	log.Info("======== Attempting to subtract gas", "gasToSubtract", mgas, "gaspool", st.gp.String())
 	if err := st.gp.SubGas(mgas); err != nil {
-		log.Info("======== Subtraction failed!!!", "err", err)
 		return err
 	}
 	st.gas += mgas.Uint64()
@@ -252,15 +250,16 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 	// Pay intrinsic gas. For a private contract this is done using the public hash passed in,
 	// not the private data retrieved above. This is because we need any (participant) validator
 	// node to get the same result as a (non-participant) minter node, to avoid out-of-gas issues.
-	log.Info("======== remaining gas prior to IntrinsicGas()", "gas", st.gas)
-	intrinsicGas := IntrinsicGas(data, contractCreation, homestead)
+	log.Info("====== tx gas prior to subtracting intrinsicGas", "value", st.gas)
+	intrinsicGas := IntrinsicGas(st.data, contractCreation, homestead)
 	if intrinsicGas.BitLen() > 64 {
 		return nil, nil, nil, false, vm.ErrOutOfGas
 	}
 	if err = st.useGas(intrinsicGas.Uint64()); err != nil {
+		log.Info("====== failed subtracting intrinsicGas", "err", err)
 		return nil, nil, nil, false, err
 	}
-	log.Info("======== remaining gas after IntrinsicGas()", "gas", st.gas)
+	log.Info("====== tx gas after subtracting intrinsicGas", "value", st.gas)
 
 	var (
 		leftoverGas uint64
@@ -308,13 +307,10 @@ func (st *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *big
 	//which can cause a 'BAD BLOCK' crash.
 	if !isPrivate {
 		st.gas = leftoverGas
-		log.Info("======== setting leftoverGas for public transaction after Create or Call", "gas", st.gas)
 	}
-	log.Info("======== left over gas to be refunded", "gas", st.gas)
 
 	st.refundGas()
 	st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(st.gasUsed(), st.gasPrice))
-	log.Info("======== remaining gas after refundGas()", "gas", st.gas)
 
 	if isPrivate {
 		return ret, new(big.Int), new(big.Int), vmerr != nil, err
