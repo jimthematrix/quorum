@@ -182,6 +182,8 @@ func (c *core) commit() {
 
 		if err := c.backend.Commit(proposal, committedSeals); err != nil {
 			c.current.UnlockHash() //Unlock block when insertion fails
+			logger := c.logger.New("state", c.state)
+			logger.Info("====>Commit failed: calling sendNextRoundChange")
 			c.sendNextRoundChange()
 			return
 		}
@@ -256,8 +258,10 @@ func (c *core) startNewRound(round *big.Int) {
 			r := &istanbul.Request{
 				Proposal: c.current.Proposal(), //c.current.Proposal would be the locked proposal by previous proposer, see updateRoundState
 			}
+			logger.Info("Sending Pre-prepare for the locked proposal", "hash", c.current.Proposal().Hash())
 			c.sendPreprepare(r)
 		} else if c.current.pendingRequest != nil {
+			logger.Info("Sending Pre-prepare for the pending request", "hash", c.current.pendingRequest.Proposal.Hash())
 			c.sendPreprepare(c.current.pendingRequest)
 		}
 	}
@@ -279,7 +283,7 @@ func (c *core) catchUpRound(view *istanbul.View) {
 	c.roundChangeSet.Clear(view.Round)
 	c.newRoundChangeTimer()
 
-	logger.Trace("Catch up round", "new_round", view.Round, "new_seq", view.Sequence, "new_proposer", c.valSet)
+	logger.Debug("Catch up round", "new_round", view.Round, "new_seq", view.Sequence, "new_proposer", c.valSet.GetProposer())
 }
 
 // updateRoundState updates round state by checking if locking block is necessary
@@ -334,6 +338,8 @@ func (c *core) newRoundChangeTimer() {
 	}
 
 	c.roundChangeTimer = time.AfterFunc(timeout, func() {
+		logger := c.logger.New("old_round", c.current.Round(), "old_seq", c.current.Sequence())
+		logger.Info("====>Round change timer: triggered")
 		c.sendEvent(timeoutEvent{})
 	})
 }

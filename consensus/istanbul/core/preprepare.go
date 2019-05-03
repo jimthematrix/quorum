@@ -93,6 +93,7 @@ func (c *core) handlePreprepare(msg *message, src istanbul.Validator) error {
 				})
 			})
 		} else {
+			logger.Info("====>Pre-prepare: failed to verify proposal, calling sendNextRoundChange. round - %v, seq - %v", c.current.Round(), c.current.Sequence())
 			c.sendNextRoundChange()
 		}
 		return err
@@ -109,6 +110,7 @@ func (c *core) handlePreprepare(msg *message, src istanbul.Validator) error {
 				c.sendCommit()
 			} else {
 				// Send round change
+				logger.Info("====>Pre-prepare: proposed hash not matching current locked hash. round - %v, seq - %v", c.current.Round(), c.current.Sequence())
 				c.sendNextRoundChange()
 			}
 		} else {

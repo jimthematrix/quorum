@@ -240,6 +240,7 @@ func (sb *backend) verifySigner(chain consensus.ChainReader, header *types.Heade
 
 	// Signer should be in the validator set of previous block's extraData.
 	if _, v := snap.ValSet.GetByAddress(signer); v == nil {
+		sb.logger.Error("Block signer is not part of validator set", "signer", signer)
 		return errUnauthorized
 	}
 	return nil

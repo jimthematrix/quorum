@@ -946,7 +946,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 		if dialDest != nil {
 			node = dialDest.ID().String()
 			direction = "OUTGOING"
-			log.Trace("Node Permissioning", "Connection Direction", direction)
+			log.Debug("Node Permissioning", "Connection Direction", direction)
 		}
 
 		if !isNodePermissioned(node, currentNode, srv.DataDir, direction) {

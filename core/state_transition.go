@@ -228,6 +228,7 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 	if err = st.useGas(gas); err != nil {
 		return nil, 0, false, err
 	}
+	log.Info("====== tx gas after subtracting intrinsicGas", "value", st.gas)
 
 	var (
 		leftoverGas uint64
@@ -256,7 +257,10 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 		if len(data) == 0 && isPrivate {
 			return nil, 0, false, nil
 		}
+<<<<<<< HEAD
 
+=======
+>>>>>>> photic-2.1.100
 		ret, leftoverGas, vmerr = evm.Call(sender, to, data, st.gas, st.value)
 	}
 	if vmerr != nil {
@@ -273,6 +277,14 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 	// However, if private contract then we don't want to do this else we can get
 	// a mismatch between a (non-participant) minter and (participant) validator,
 	// which can cause a 'BAD BLOCK' crash.
+	if !isPrivate {
+		st.gas = leftoverGas
+	}
+
+	//Pay gas used during contract creation or execution (st.gas tracks remaining gas)
+	//However, if private contract then we don't want to do this else we could
+	//have a mismatch between a (non-participant) minter and (participant) validator,
+	//which can cause a 'BAD BLOCK' crash.
 	if !isPrivate {
 		st.gas = leftoverGas
 	}

@@ -24,14 +24,14 @@ func isNodePermissioned(nodename string, currentNode string, datadir string, dir
 		permissionedList = append(permissionedList, v.ID().String())
 	}
 
-	log.Debug("isNodePermissioned", "permissionedList", permissionedList)
+	// log.Debug("isNodePermissioned", "permissionedList", permissionedList)
 	for _, v := range permissionedList {
 		if v == nodename {
-			log.Debug("isNodePermissioned", "connection", direction, "nodename", nodename[:NODE_NAME_LENGTH], "ALLOWED-BY", currentNode[:NODE_NAME_LENGTH])
+			log.Debug("isNodePermissioned", "connection", direction, "nodename", nodename, "ALLOWED-BY", currentNode)
 			return true
 		}
 	}
-	log.Debug("isNodePermissioned", "connection", direction, "nodename", nodename[:NODE_NAME_LENGTH], "DENIED-BY", currentNode[:NODE_NAME_LENGTH])
+	// log.Debug("isNodePermissioned", "connection", direction, "nodename", nodename, "DENIED-BY", currentNode)
 	return false
 }
 
