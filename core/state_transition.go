@@ -257,10 +257,6 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 		if len(data) == 0 && isPrivate {
 			return nil, 0, false, nil
 		}
-<<<<<<< HEAD
-
-=======
->>>>>>> photic-2.1.100
 		ret, leftoverGas, vmerr = evm.Call(sender, to, data, st.gas, st.value)
 	}
 	if vmerr != nil {
