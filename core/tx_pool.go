@@ -559,7 +559,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	// Heuristic limit, reject transactions over 32KB to prevent DOS attacks
 	// UPDATED to 64KB to support the deployment of bigger contract due to the pressing need for sophisticated/complex contract in financial/capital markets - Nathan Aw
-	if tx.Size() > 64*1024 {
+	if tx.Size() > 128*1024 {
 		return ErrOversizedData
 	}
 	// Transactions can't be negative. This may never happen using RLP decoded
