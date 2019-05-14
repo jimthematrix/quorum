@@ -154,7 +154,7 @@ var DefaultTxPoolConfig = TxPoolConfig{
 	Journal:   "transactions.rlp",
 	Rejournal: time.Hour,
 
-	TransactionSizeLimit: 64,
+	TransactionSizeLimit: 128,
 	MaxCodeSize:          24,
 
 	PriceLimit: 1,
