@@ -173,7 +173,7 @@ var DefaultTxPoolConfig = TxPoolConfig{
 	Lifetime: 3 * time.Hour,
 
 	// Quorum
-	TransactionSizeLimit: 64,
+	TransactionSizeLimit: 128,
 	MaxCodeSize:          24,
 }
 
