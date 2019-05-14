@@ -180,7 +180,7 @@ var DefaultTxPoolConfig = TxPoolConfig{
 	Lifetime: 3 * time.Hour,
 
 	// Quorum
-	TransactionSizeLimit: 64,
+	TransactionSizeLimit: 128,
 	MaxCodeSize:          24,
 }
 
@@ -858,6 +858,7 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		}
 		errs[nilSlot] = err
 	}
+	log.Trace("Filtered transactions with errors", "count", len(errs))
 	// Reorg the pool internals if needed and return
 	done := pool.requestPromoteExecutables(dirtyAddrs)
 	if sync {
@@ -1245,9 +1246,9 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 			hash := tx.Hash()
 			pool.all.Remove(hash)
 		}
+		log.Trace("Removed old queued transactions", "count", len(forwards))
 		var drops types.Transactions
 		if !isQuorum {
-			log.Trace("Removed old queued transactions", "count", len(forwards))
 			// Drop all transactions that are too costly (low balance or out of gas)
 			drops, _ := list.Filter(pool.currentState.GetBalance(addr), pool.currentMaxGas)
 			for _, tx := range drops {

@@ -347,7 +347,6 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 				ReturnData: nil,
 			}, nil
 		}
-
 		ret, leftoverGas, vmerr = evm.Call(sender, to, data, st.gas, st.value)
 	}
 	if vmerr != nil {
