@@ -101,7 +101,7 @@ func (c *core) handleRoundChange(msg *message, src istanbul.Validator) error {
 			c.sendRoundChange(roundView.Round)
 		}
 		return nil
-	} else if num == int(2*c.valSet.F()+1) && (c.waitingForRoundChange || cv.Round.Cmp(roundView.Round) < 0) {
+	} else if num == int(c.valSet.Size()-c.valSet.F()) && (c.waitingForRoundChange || cv.Round.Cmp(roundView.Round) < 0) {
 		// We've received 2f+1 ROUND CHANGE messages, start a new round immediately.
 		logger.Info(fmt.Sprintf("====>Starting New round after 2f+1 messages: new round - %v, seq - %v", roundView.Round, c.current.Sequence()))
 		c.startNewRound(roundView.Round)
