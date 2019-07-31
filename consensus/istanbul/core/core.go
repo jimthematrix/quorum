@@ -114,7 +114,6 @@ func (c *core) finalizeMessage(msg *message) ([]byte, error) {
 			return nil, err
 		}
 	}
-
 	// Sign message
 	data, err := msg.PayloadNoSig()
 	if err != nil {

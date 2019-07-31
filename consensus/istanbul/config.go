@@ -28,6 +28,7 @@ type Config struct {
 	BlockPeriod    uint64         `toml:",omitempty"` // Default minimum difference between two consecutive block's timestamps in second
 	ProposerPolicy ProposerPolicy `toml:",omitempty"` // The policy for proposer selection
 	Epoch          uint64         `toml:",omitempty"` // The number of blocks after which to checkpoint and reset the pending votes
+	QuorumFormula   uint64         `toml:",omitempty"` // The quorum formula used, 0 ==> 2f+1, 1 ==> Ceil(2N/3), 2 ==> N-f
 }
 
 var DefaultConfig = &Config{
@@ -35,4 +36,5 @@ var DefaultConfig = &Config{
 	BlockPeriod:    1,
 	ProposerPolicy: RoundRobin,
 	Epoch:          30000,
+	QuorumFormula:    1,
 }
