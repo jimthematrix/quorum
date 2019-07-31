@@ -36,5 +36,5 @@ var DefaultConfig = &Config{
 	BlockPeriod:    1,
 	ProposerPolicy: RoundRobin,
 	Epoch:          30000,
-	QuorumFormula:    1,
+	QuorumFormula:    0,
 }
