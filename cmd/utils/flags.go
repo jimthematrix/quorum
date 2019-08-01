@@ -618,6 +618,11 @@ var (
 		Usage: "Default minimum difference between two consecutive block's timestamps in seconds",
 		Value: eth.DefaultConfig.Istanbul.BlockPeriod,
 	}
+	IstanbulQuorumFormulaFlag = cli.Uint64Flag{
+		Name: "istanbul.quorumformula",
+		Usage: "Formula used for calculating quorum, 0 ==> 2f+1, 1 ==> Ceil(2N/3), 2 ==> N-f",
+		Value: eth.DefaultConfig.Istanbul.QuorumFormula,
+	}
 
 	// Metrics flags
 	MetricsEnabledFlag = cli.BoolFlag{
@@ -1125,6 +1130,9 @@ func setIstanbul(ctx *cli.Context, cfg *eth.Config) {
 	}
 	if ctx.GlobalIsSet(IstanbulBlockPeriodFlag.Name) {
 		cfg.Istanbul.BlockPeriod = ctx.GlobalUint64(IstanbulBlockPeriodFlag.Name)
+	}
+	if ctx.GlobalIsSet(IstanbulQuorumFormulaFlag.Name) {
+		cfg.Istanbul.QuorumFormula = ctx.GlobalUint64(IstanbulQuorumFormulaFlag.Name)
 	}
 }
 

@@ -68,9 +68,9 @@ func newDefaultSet(addrs []common.Address, policy istanbul.ProposerPolicy) *defa
 	if policy == istanbul.Sticky {
 		valSet.selector = stickyProposer
 	}
-
 	return valSet
 }
+
 
 func (valSet *defaultSet) Size() int {
 	valSet.validatorMu.RLock()
@@ -199,3 +199,13 @@ func (valSet *defaultSet) Copy() istanbul.ValidatorSet {
 func (valSet *defaultSet) F() int { return int(math.Ceil(float64(valSet.Size())/3)) - 1 }
 
 func (valSet *defaultSet) Policy() istanbul.ProposerPolicy { return valSet.policy }
+
+func (valSet *defaultSet) QuorumSize(formulaType uint64) int {
+	if formulaType == 1 {
+		return int(math.Ceil(float64(2*valSet.Size()/3)))
+	} else if formulaType == 2 {
+		return int(valSet.Size()-valSet.F())
+	} else {
+		return int(2*valSet.F()+1)
+	}
+}

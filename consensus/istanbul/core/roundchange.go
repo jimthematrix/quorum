@@ -91,7 +91,7 @@ func (c *core) handleRoundChange(msg *message, src istanbul.Validator) error {
 		return err
 	}
 
-	logger.Debug(fmt.Sprintf("=====> Handling round change msg, current round: %v, current sequence: %v, total number of round change msg for the round %v, sequence %v, is %v, waiting for round change? %v, current F() is %v", cv.Round, cv.Sequence, roundView.Round, roundView.Sequence, num, c.waitingForRoundChange, c.valSet.F()))
+	logger.Debug(fmt.Sprintf("=====> Handling round change msg, current round: %v, current sequence: %v, total number of round change msg for the round %v, sequence %v, is %v, waiting for round change? %v, current F() is %v, quorum formula is %v, quorum is %v", cv.Round, cv.Sequence, roundView.Round, roundView.Sequence, num, c.waitingForRoundChange, c.valSet.F(), c.config.QuorumFormula, c.valSet.QuorumSize(c.config.QuorumFormula)))
 	// Once we received f+1 ROUND CHANGE messages, those messages form a weak certificate.
 	// If our round number is smaller than the certificate's round number, we would
 	// try to catch up the round number.
@@ -101,7 +101,7 @@ func (c *core) handleRoundChange(msg *message, src istanbul.Validator) error {
 			c.sendRoundChange(roundView.Round)
 		}
 		return nil
-	} else if num == int(2*c.valSet.F()+1) && (c.waitingForRoundChange || cv.Round.Cmp(roundView.Round) < 0) {
+	} else if num == c.valSet.QuorumSize(c.config.QuorumFormula) && (c.waitingForRoundChange || cv.Round.Cmp(roundView.Round) < 0) {
 		// We've received 2f+1 ROUND CHANGE messages, start a new round immediately.
 		logger.Info(fmt.Sprintf("====>Starting New round after 2f+1 messages: new round - %v, seq - %v", roundView.Round, c.current.Sequence()))
 		c.startNewRound(roundView.Round)
