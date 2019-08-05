@@ -202,7 +202,7 @@ func (valSet *defaultSet) Policy() istanbul.ProposerPolicy { return valSet.polic
 
 func (valSet *defaultSet) QuorumSize(formulaType uint64) int {
 	if formulaType == 1 {
-		return int(math.Ceil(float64(2*valSet.Size()/3)))
+		return int(math.Ceil(float64(2*valSet.Size())/3))
 	} else if formulaType == 2 {
 		return int(valSet.Size()-valSet.F())
 	} else {
