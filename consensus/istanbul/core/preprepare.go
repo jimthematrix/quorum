@@ -37,7 +37,7 @@ func (c *core) sendPreprepare(request *istanbul.Request) {
 			logger.Error("Failed to encode", "view", curView)
 			return
 		}
-		logger.Debug(fmt.Sprintf("=====> Broadcast preprepare, address: %v", c.Address()))
+		logger.Debug(fmt.Sprintf("=====> Broadcast preprepare, address: %v", c.Address().String()))
 		c.broadcast(&message{
 			Code: msgPreprepare,
 			Msg:  preprepare,

@@ -61,7 +61,7 @@ func (c *core) handlePrepare(msg *message, src istanbul.Validator) error {
 	// and we are in earlier state before Prepared state.
 	if ((c.current.IsHashLocked() && prepare.Digest == c.current.GetLockedHash()) || c.current.GetPrepareOrCommitSize() >= c.QuorumSize()) &&
 		c.state.Cmp(StatePrepared) < 0 {
-		c.logger.Debug(fmt.Sprintf("=====>Prepared, due to 2f+1 prepare or commit msgs, address: %v", c.Address()))
+		c.logger.Debug(fmt.Sprintf("=====>Prepared, due to 2f+1 prepare or commit msgs, address: %v, msgSender: %v", c.Address().String(), msg.Address.String()))
 		c.current.LockHash()
 		c.setState(StatePrepared)
 		c.sendCommit()
