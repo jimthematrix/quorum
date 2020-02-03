@@ -749,7 +749,14 @@ func (pm *ProtocolManager) eventLoop() {
 						headBlockHash := pm.blockchain.CurrentBlock().Hash()
 						log.Warn("not applying already-applied block", "block hash", block.Hash(), "parent", block.ParentHash(), "head", headBlockHash)
 					} else {
-						pm.applyNewChainHead(&block)
+						err = pm.applyNewChainHead(&block)
+						if core.ErrAbortedByInterrupt == err {
+							// if we are interrupted by node shutting down, simple return
+							// this will prevent raft from advancing the index that will cause
+							// the block index and raft index to get out of sync
+							log.Error("=====>raft/handler: blockchain reported aborted processing due to Interrupt signal, skip advancing index and return")
+							return
+						}
 					}
 
 				case raftpb.EntryConfChange:
@@ -869,7 +876,7 @@ func blockExtendsChain(block *types.Block, chain *core.BlockChain) bool {
 	return block.ParentHash() == chain.CurrentBlock().Hash()
 }
 
-func (pm *ProtocolManager) applyNewChainHead(block *types.Block) {
+func (pm *ProtocolManager) applyNewChainHead(block *types.Block) error {
 	if !blockExtendsChain(block, pm.blockchain) {
 		headBlock := pm.blockchain.CurrentBlock()
 
@@ -890,11 +897,17 @@ func (pm *ProtocolManager) applyNewChainHead(block *types.Block) {
 		_, err := pm.blockchain.InsertChain([]*types.Block{block})
 
 		if err != nil {
+			if err == core.ErrAbortedByInterrupt {
+				return err
+			}
+
 			panic(fmt.Sprintf("failed to extend chain: %s", err.Error()))
 		}
 
 		log.EmitCheckpoint(log.BlockCreated, "block", fmt.Sprintf("%x", block.Hash()))
 	}
+
+	return nil
 }
 
 // Sets new appliedIndex in-memory, *and* writes this appliedIndex to LevelDB.

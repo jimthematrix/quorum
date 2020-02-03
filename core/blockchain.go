@@ -51,6 +51,7 @@ var (
 	blockInsertTimer = metrics.NewRegisteredTimer("chain/inserts", nil)
 
 	ErrNoGenesis = errors.New("Genesis not found in chain")
+	ErrAbortedByInterrupt = errors.New("Premature abort during blocks processing")
 )
 
 const (
@@ -1149,7 +1150,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks) (int, []interface{}, []*ty
 		// If the chain is terminating, stop processing blocks
 		if atomic.LoadInt32(&bc.procInterrupt) == 1 {
 			log.Debug("Premature abort during blocks processing")
-			break
+			return 0, nil, nil, ErrAbortedByInterrupt
 		}
 		// If the header is a banned one, straight out abort
 		if BadHashes[block.Hash()] {
