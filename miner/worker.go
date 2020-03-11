@@ -883,6 +883,8 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	log.Debugf("Committing new work noempty=%t", noempty)
+
 	tstart := time.Now()
 	parent := w.chain.CurrentBlock()
 
@@ -992,12 +994,14 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	}
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs)
+		log.Debugf("Committing %d local transactions", len(txs))
 		if w.commitTransactions(txs, w.coinbase, interrupt) {
 			return
 		}
 	}
 	if len(remoteTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, remoteTxs)
+		log.Debugf("Committing %d remote transactions", len(txs))
 		if w.commitTransactions(txs, w.coinbase, interrupt) {
 			return
 		}
