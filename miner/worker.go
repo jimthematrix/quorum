@@ -19,6 +19,7 @@ package miner
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -883,7 +884,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	log.Debugf("Committing new work noempty=%t", noempty)
+	log.Debug(fmt.Sprintf("Committing new work (noempty=%t)", noempty))
 
 	tstart := time.Now()
 	parent := w.chain.CurrentBlock()
@@ -984,6 +985,11 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		w.updateSnapshot()
 		return
 	}
+
+	for address, aTx := range pending {
+		log.Debug(fmt.Sprintf("%d pending transactions for %s", len(aTx), address.String()))
+	}
+
 	// Split the pending transactions into locals and remotes
 	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pending
 	for _, account := range w.eth.TxPool().Locals() {
@@ -992,16 +998,21 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			localTxs[account] = txs
 		}
 	}
+
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, localTxs)
-		log.Debugf("Committing %d local transactions", len(txs))
+		for address, aTx := range txs.TXs() {
+			log.Debug(fmt.Sprintf("Committing %d local transactions for %s", len(aTx), address.String()))
+		}
 		if w.commitTransactions(txs, w.coinbase, interrupt) {
 			return
 		}
 	}
 	if len(remoteTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(w.current.signer, remoteTxs)
-		log.Debugf("Committing %d remote transactions", len(txs))
+		for address, aTx := range txs.TXs() {
+			log.Debug(fmt.Sprintf("Committing %d remote transactions for %s", len(aTx), address.String()))
+		}
 		if w.commitTransactions(txs, w.coinbase, interrupt) {
 			return
 		}
