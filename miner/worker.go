@@ -1019,7 +1019,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			return
 		}
 	}
-	log.Debug(fmt.Sprintf("Committed transactions after %.4ds", time.Now().Sub(now).Milliseconds()))
+	log.Debug(fmt.Sprintf("Committed transactions after %.2fms", float64(time.Now().Sub(now)/time.Millisecond)))
 	w.commit(uncles, w.fullTaskHook, true, tstart)
 }
 
