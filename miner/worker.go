@@ -987,6 +987,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 		return
 	}
 
+	now := time.Now()
 	for address, aTx := range pending {
 		log.Debug(fmt.Sprintf("%d pending transactions for %s", len(aTx), address.String()))
 	}
@@ -1018,6 +1019,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 			return
 		}
 	}
+	log.Debug(fmt.Sprintf("Committed transactions after %.4ds", time.Now().Sub(now).Milliseconds()))
 	w.commit(uncles, w.fullTaskHook, true, tstart)
 }
 
