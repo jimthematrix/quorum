@@ -968,18 +968,19 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	commitUncles(w.localUncles)
 	commitUncles(w.remoteUncles)
 
-	if !noempty {
-		// Create an empty block based on temporary copied state for sealing in advance without waiting block
-		// execution finished.
-		w.commit(uncles, nil, false, tstart)
-	}
-
 	// Fill the block with all available pending transactions.
 	pending, err := w.eth.TxPool().Pending()
 	if err != nil {
 		log.Error("Failed to fetch pending transactions", "err", err)
 		return
 	}
+
+	if !noempty && len(pending) == 0 {
+		// Create an empty block based on temporary copied state for sealing in advance without waiting block
+		// execution finished.
+		w.commit(uncles, nil, false, tstart)
+	}
+
 	// Short circuit if there is no available pending transactions
 	if len(pending) == 0 {
 		w.updateSnapshot()
