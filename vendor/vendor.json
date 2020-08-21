@@ -949,6 +949,14 @@
 			"revisionTime": "2017-11-09T13:50:42Z"
 		},
 		{
+			"checksumSHA1": "8BHL4R9/PomAlphPTe5xJLnCvlQ=",
+			"path": "golang.org/x/text",
+			"revision": "23ae387dee1f90d29a23c0e87ee0b46038fbed0e",
+			"revisionTime": "2020-06-11T18:50:30Z",
+			"version": "v0.3.3",
+			"versionExact": "v0.3.3"
+		},
+		{
 			"checksumSHA1": "Mr4ur60bgQJnQFfJY0dGtwWwMPE=",
 			"path": "golang.org/x/text/encoding",
 			"revision": "85c29909967d7f171f821e7a42e7b7af76fb9598",
@@ -1389,5 +1397,5 @@
 			"revisionTime": "2017-08-11T01:42:03Z"
 		}
 	],
-	"rootPath": "github.com/ethereum/go-ethereum"
+	"rootPath": "github.com/jpmorganchase/quorum"
 }
