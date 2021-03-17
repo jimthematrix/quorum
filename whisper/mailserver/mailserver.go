@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+// Package mailserver provides a naive, example mailserver implementation
 package mailserver
 
 import (
@@ -26,9 +27,12 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	whisper "github.com/ethereum/go-ethereum/whisper/whisperv6"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
+// WMailServer represents the state data of the mailserver.
 type WMailServer struct {
 	db  *leveldb.DB
 	w   *whisper.Whisper
@@ -42,6 +46,8 @@ type DBKey struct {
 	raw       []byte
 }
 
+// NewDbKey is a helper function that creates a levelDB
+// key from a hash and an integer.
 func NewDbKey(t uint32, h common.Hash) *DBKey {
 	const sz = common.HashLength + 4
 	var k DBKey
@@ -53,6 +59,7 @@ func NewDbKey(t uint32, h common.Hash) *DBKey {
 	return &k
 }
 
+// Init initializes the mail server.
 func (s *WMailServer) Init(shh *whisper.Whisper, path string, password string, pow float64) error {
 	var err error
 	if len(path) == 0 {
@@ -63,7 +70,10 @@ func (s *WMailServer) Init(shh *whisper.Whisper, path string, password string, p
 		return fmt.Errorf("password is not specified")
 	}
 
-	s.db, err = leveldb.OpenFile(path, nil)
+	s.db, err = leveldb.OpenFile(path, &opt.Options{OpenFilesCacheCapacity: 32})
+	if _, iscorrupted := err.(*errors.ErrCorrupted); iscorrupted {
+		s.db, err = leveldb.RecoverFile(path, nil)
+	}
 	if err != nil {
 		return fmt.Errorf("open DB file: %s", err)
 	}
@@ -82,12 +92,14 @@ func (s *WMailServer) Init(shh *whisper.Whisper, path string, password string, p
 	return nil
 }
 
+// Close cleans up before shutdown.
 func (s *WMailServer) Close() {
 	if s.db != nil {
 		s.db.Close()
 	}
 }
 
+// Archive stores the
 func (s *WMailServer) Archive(env *whisper.Envelope) {
 	key := NewDbKey(env.Expiry-env.TTL, env.Hash())
 	rawEnvelope, err := rlp.EncodeToBytes(env)
@@ -101,6 +113,8 @@ func (s *WMailServer) Archive(env *whisper.Envelope) {
 	}
 }
 
+// DeliverMail responds with saved messages upon request by the
+// messages' owner.
 func (s *WMailServer) DeliverMail(peer *whisper.Peer, request *whisper.Envelope) {
 	if peer == nil {
 		log.Error("Whisper peer is nil")
@@ -159,7 +173,7 @@ func (s *WMailServer) validateRequest(peerID []byte, request *whisper.Envelope) 
 	f := whisper.Filter{KeySym: s.key}
 	decrypted := request.Open(&f)
 	if decrypted == nil {
-		log.Warn(fmt.Sprintf("Failed to decrypt p2p request"))
+		log.Warn("Failed to decrypt p2p request")
 		return false, 0, 0, nil
 	}
 
@@ -171,19 +185,19 @@ func (s *WMailServer) validateRequest(peerID []byte, request *whisper.Envelope) 
 	// if you want to check the signature, you can do it here. e.g.:
 	// if !bytes.Equal(peerID, src) {
 	if src == nil {
-		log.Warn(fmt.Sprintf("Wrong signature of p2p request"))
+		log.Warn("Wrong signature of p2p request")
 		return false, 0, 0, nil
 	}
 
 	var bloom []byte
 	payloadSize := len(decrypted.Payload)
 	if payloadSize < 8 {
-		log.Warn(fmt.Sprintf("Undersized p2p request"))
+		log.Warn("Undersized p2p request")
 		return false, 0, 0, nil
 	} else if payloadSize == 8 {
 		bloom = whisper.MakeFullNodeBloom()
 	} else if payloadSize < 8+whisper.BloomFilterSize {
-		log.Warn(fmt.Sprintf("Undersized bloom filter in p2p request"))
+		log.Warn("Undersized bloom filter in p2p request")
 		return false, 0, 0, nil
 	} else {
 		bloom = decrypted.Payload[8 : 8+whisper.BloomFilterSize]

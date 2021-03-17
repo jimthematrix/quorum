@@ -18,6 +18,7 @@
 package rawdb
 
 import (
+	"bytes"
 	"encoding/binary"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -29,17 +30,32 @@ var (
 	// databaseVerisionKey tracks the current database version.
 	databaseVerisionKey = []byte("DatabaseVersion")
 
-	// headHeaderKey tracks the latest know header's hash.
+	// headHeaderKey tracks the latest known header's hash.
 	headHeaderKey = []byte("LastHeader")
 
-	// headBlockKey tracks the latest know full block's hash.
+	// headBlockKey tracks the latest known full block's hash.
 	headBlockKey = []byte("LastBlock")
 
 	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
 	headFastBlockKey = []byte("LastFast")
 
+	// lastPivotKey tracks the last pivot block used by fast sync (to reenable on sethead).
+	lastPivotKey = []byte("LastPivot")
+
 	// fastTrieProgressKey tracks the number of trie entries imported during fast sync.
 	fastTrieProgressKey = []byte("TrieSync")
+
+	// snapshotRootKey tracks the hash of the last snapshot.
+	snapshotRootKey = []byte("SnapshotRoot")
+
+	// snapshotJournalKey tracks the in-memory diff layers across restarts.
+	snapshotJournalKey = []byte("SnapshotJournal")
+
+	// txIndexTailKey tracks the oldest block whose transactions have been indexed.
+	txIndexTailKey = []byte("TransactionIndexTail")
+
+	// fastTxLookupLimitKey tracks the transaction lookup limit during fast sync.
+	fastTxLookupLimitKey = []byte("FastTransactionLookupLimit")
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	headerPrefix       = []byte("h") // headerPrefix + num (uint64 big endian) + hash -> header
@@ -50,8 +66,11 @@ var (
 	blockBodyPrefix     = []byte("b") // blockBodyPrefix + num (uint64 big endian) + hash -> block body
 	blockReceiptsPrefix = []byte("r") // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
-	txLookupPrefix  = []byte("l") // txLookupPrefix + hash -> transaction/receipt lookup metadata
-	bloomBitsPrefix = []byte("B") // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	txLookupPrefix        = []byte("l") // txLookupPrefix + hash -> transaction/receipt lookup metadata
+	bloomBitsPrefix       = []byte("B") // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	SnapshotAccountPrefix = []byte("a") // SnapshotAccountPrefix + account hash -> account trie value
+	SnapshotStoragePrefix = []byte("o") // SnapshotStoragePrefix + account hash + storage hash -> storage trie value
+	codePrefix            = []byte("c") // codePrefix + code hash -> account code
 
 	preimagePrefix = []byte("secure-key-")      // preimagePrefix + hash -> preimage
 	configPrefix   = []byte("ethereum-config-") // config prefix for the db
@@ -63,9 +82,36 @@ var (
 	preimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
 )
 
-// TxLookupEntry is a positional metadata to help looking up the data content of
-// a transaction or receipt given only its hash.
-type TxLookupEntry struct {
+const (
+	// freezerHeaderTable indicates the name of the freezer header table.
+	freezerHeaderTable = "headers"
+
+	// freezerHashTable indicates the name of the freezer canonical hash table.
+	freezerHashTable = "hashes"
+
+	// freezerBodiesTable indicates the name of the freezer block body table.
+	freezerBodiesTable = "bodies"
+
+	// freezerReceiptTable indicates the name of the freezer receipts table.
+	freezerReceiptTable = "receipts"
+
+	// freezerDifficultyTable indicates the name of the freezer total difficulty table.
+	freezerDifficultyTable = "diffs"
+)
+
+// freezerNoSnappy configures whether compression is disabled for the ancient-tables.
+// Hashes and difficulties don't compress well.
+var freezerNoSnappy = map[string]bool{
+	freezerHeaderTable:     false,
+	freezerHashTable:       true,
+	freezerBodiesTable:     false,
+	freezerReceiptTable:    false,
+	freezerDifficultyTable: true,
+}
+
+// LegacyTxLookupEntry is the legacy TxLookupEntry definition with some unnecessary
+// fields.
+type LegacyTxLookupEntry struct {
 	BlockHash  common.Hash
 	BlockIndex uint64
 	Index      uint64
@@ -76,6 +122,11 @@ func encodeBlockNumber(number uint64) []byte {
 	enc := make([]byte, 8)
 	binary.BigEndian.PutUint64(enc, number)
 	return enc
+}
+
+// headerKeyPrefix = headerPrefix + num (uint64 big endian)
+func headerKeyPrefix(number uint64) []byte {
+	return append(headerPrefix, encodeBlockNumber(number)...)
 }
 
 // headerKey = headerPrefix + num (uint64 big endian) + hash
@@ -113,6 +164,21 @@ func txLookupKey(hash common.Hash) []byte {
 	return append(txLookupPrefix, hash.Bytes()...)
 }
 
+// accountSnapshotKey = SnapshotAccountPrefix + hash
+func accountSnapshotKey(hash common.Hash) []byte {
+	return append(SnapshotAccountPrefix, hash.Bytes()...)
+}
+
+// storageSnapshotKey = SnapshotStoragePrefix + account hash + storage hash
+func storageSnapshotKey(accountHash, storageHash common.Hash) []byte {
+	return append(append(SnapshotStoragePrefix, accountHash.Bytes()...), storageHash.Bytes()...)
+}
+
+// storageSnapshotsKey = SnapshotStoragePrefix + account hash + storage hash
+func storageSnapshotsKey(accountHash common.Hash) []byte {
+	return append(SnapshotStoragePrefix, accountHash.Bytes()...)
+}
+
 // bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
 func bloomBitsKey(bit uint, section uint64, hash common.Hash) []byte {
 	key := append(append(bloomBitsPrefix, make([]byte, 10)...), hash.Bytes()...)
@@ -126,6 +192,20 @@ func bloomBitsKey(bit uint, section uint64, hash common.Hash) []byte {
 // preimageKey = preimagePrefix + hash
 func preimageKey(hash common.Hash) []byte {
 	return append(preimagePrefix, hash.Bytes()...)
+}
+
+// codeKey = codePrefix + hash
+func codeKey(hash common.Hash) []byte {
+	return append(codePrefix, hash.Bytes()...)
+}
+
+// IsCodeKey reports whether the given byte slice is the key of contract code,
+// if so return the raw code hash as well.
+func IsCodeKey(key []byte) (bool, []byte) {
+	if bytes.HasPrefix(key, codePrefix) && len(key) == common.HashLength+len(codePrefix) {
+		return true, key[len(codePrefix):]
+	}
+	return false, nil
 }
 
 // configKey = configPrefix + hash

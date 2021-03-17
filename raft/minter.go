@@ -18,7 +18,6 @@ package raft
 
 import (
 	"fmt"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 var (
@@ -89,7 +89,7 @@ func newMinter(config *params.ChainConfig, eth *RaftService, blockTime time.Dura
 		speculativeChain: newSpeculativeChain(),
 
 		invalidRaftOrderingChan: make(chan InvalidRaftOrdering, 1),
-		chainHeadChan:           make(chan core.ChainHeadEvent, 1),
+		chainHeadChan:           make(chan core.ChainHeadEvent, core.GetChainHeadChannleSize()),
 		txPreChan:               make(chan core.NewTxsEvent, 4096),
 	}
 
@@ -213,7 +213,7 @@ func throttle(rate time.Duration, f func()) func() {
 
 		for range ticker.C {
 			<-request.Out()
-			go f()
+			f()
 		}
 	}()
 
@@ -241,7 +241,7 @@ func (minter *minter) mintingLoop() {
 }
 
 func generateNanoTimestamp(parent *types.Block) (tstamp int64) {
-	parentTime := parent.Time().Int64()
+	parentTime := int64(parent.Time())
 	tstamp = time.Now().UnixNano()
 
 	if parentTime >= tstamp {
@@ -265,7 +265,7 @@ func (minter *minter) createWork() *work {
 		GasLimit:   minter.eth.calcGasLimitFunc(parent),
 		GasUsed:    0,
 		Coinbase:   minter.coinbase,
-		Time:       big.NewInt(tstamp),
+		Time:       uint64(tstamp),
 	}
 
 	publicState, privateState, err := minter.chain.StateAt(parent.Root())
@@ -313,7 +313,7 @@ func (minter *minter) mintNewBlock() {
 	work := minter.createWork()
 	transactions := minter.getTransactions()
 
-	committedTxes, publicReceipts, privateReceipts, logs := work.commitTransactions(transactions, minter.chain)
+	committedTxes, publicReceipts, _, logs := work.commitTransactions(transactions, minter.chain)
 	txCount := len(committedTxes)
 
 	if txCount == 0 {
@@ -328,9 +328,6 @@ func (minter *minter) mintNewBlock() {
 	// commit state root after all state transitions.
 	ethash.AccumulateRewards(minter.chain.Config(), work.publicState, header, nil)
 	header.Root = work.publicState.IntermediateRoot(minter.chain.Config().IsEIP158(work.header.Number))
-
-	allReceipts := append(publicReceipts, privateReceipts...)
-	header.Bloom = types.CreateBloom(allReceipts)
 
 	// update block hash since it is now available, but was not when the
 	// receipt/log of individual transactions were created:
@@ -347,23 +344,20 @@ func (minter *minter) mintNewBlock() {
 	header.Extra = make([]byte, extraVanity+len(extraSealBytes))
 	copy(header.Extra[extraVanity:], extraSealBytes)
 
-	block := types.NewBlock(header, committedTxes, nil, publicReceipts)
+	block := types.NewBlock(header, committedTxes, nil, publicReceipts, new(trie.Trie))
 
 	log.Info("Generated next block", "block num", block.Number(), "num txes", txCount)
 
 	deleteEmptyObjects := minter.chain.Config().IsEIP158(block.Number())
-	if _, err := work.publicState.Commit(deleteEmptyObjects); err != nil {
-		panic(fmt.Sprint("error committing public state: ", err))
-	}
-	if _, privStateErr := work.privateState.Commit(deleteEmptyObjects); privStateErr != nil {
-		panic(fmt.Sprint("error committing private state: ", privStateErr))
+	if err := minter.chain.CommitBlockWithState(deleteEmptyObjects, work.publicState, work.privateState); err != nil {
+		panic(err)
 	}
 
 	minter.speculativeChain.extend(block)
 
 	minter.mux.Post(core.NewMinedBlockEvent{Block: block})
 
-	elapsed := time.Since(time.Unix(0, header.Time.Int64()))
+	elapsed := time.Since(time.Unix(0, int64(header.Time)))
 	log.Info("🔨  Mined block", "number", block.Number(), "hash", fmt.Sprintf("%x", block.Hash().Bytes()[:4]), "elapsed", elapsed)
 }
 
@@ -414,13 +408,15 @@ func (env *work) commitTransaction(tx *types.Transaction, bc *core.BlockChain, g
 
 	var author *common.Address
 	var vmConf vm.Config
-	publicReceipt, privateReceipt, _, err := core.ApplyTransaction(env.config, bc, author, gp, env.publicState, env.privateState, env.header, tx, &env.header.GasUsed, vmConf)
+	txnStart := time.Now()
+	publicReceipt, privateReceipt, err := core.ApplyTransaction(env.config, bc, author, gp, env.publicState, env.privateState, env.header, tx, &env.header.GasUsed, vmConf)
 	if err != nil {
 		env.publicState.RevertToSnapshot(publicSnapshot)
 		env.privateState.RevertToSnapshot(privateSnapshot)
 
 		return nil, nil, err
 	}
+	log.EmitCheckpoint(log.TxCompleted, "tx", tx.Hash().Hex(), "time", time.Since(txnStart))
 
 	return publicReceipt, privateReceipt, nil
 }
@@ -436,8 +432,7 @@ func (minter *minter) buildExtraSeal(headerHash common.Hash) []byte {
 	//build the extraSeal struct
 	raftIdString := hexutil.EncodeUint64(uint64(minter.eth.raftProtocolManager.raftId))
 
-	var extra extraSeal
-	extra = extraSeal{
+	extra := extraSeal{
 		RaftId:    []byte(raftIdString[2:]), //remove the 0x prefix
 		Signature: sig,
 	}

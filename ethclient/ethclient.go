@@ -24,9 +24,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -60,6 +59,11 @@ func NewClient(c *rpc.Client) *Client {
 
 // Quorum
 //
+// NewClientWithPTM creates a client that uses the given RPC client and the privateTransactionManager client
+func NewClientWithPTM(c *rpc.Client, ptm privateTransactionManagerClient) *Client {
+	return &Client{c, ptm}
+}
+
 // provides support for private transactions
 func (ec *Client) WithPrivateTransactionManager(rawurl string) (*Client, error) {
 	var err error
@@ -70,11 +74,23 @@ func (ec *Client) WithPrivateTransactionManager(rawurl string) (*Client, error) 
 	return ec, nil
 }
 
+// /Quorum
+
 func (ec *Client) Close() {
 	ec.c.Close()
 }
 
 // Blockchain Access
+
+// ChainId retrieves the current chain ID for transaction replay protection.
+func (ec *Client) ChainID(ctx context.Context) (*big.Int, error) {
+	var result hexutil.Big
+	err := ec.c.CallContext(ctx, &result, "eth_chainId")
+	if err != nil {
+		return nil, err
+	}
+	return (*big.Int)(&result), err
+}
 
 // BlockByHash returns the given full block.
 //
@@ -256,12 +272,13 @@ func (ec *Client) TransactionCount(ctx context.Context, blockHash common.Hash) (
 func (ec *Client) TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (*types.Transaction, error) {
 	var json *rpcTransaction
 	err := ec.c.CallContext(ctx, &json, "eth_getTransactionByBlockHashAndIndex", blockHash, hexutil.Uint64(index))
-	if err == nil {
-		if json == nil {
-			return nil, ethereum.NotFound
-		} else if _, r, _ := json.tx.RawSignatureValues(); r == nil {
-			return nil, fmt.Errorf("server returned transaction without signature")
-		}
+	if err != nil {
+		return nil, err
+	}
+	if json == nil {
+		return nil, ethereum.NotFound
+	} else if _, r, _ := json.tx.RawSignatureValues(); r == nil {
+		return nil, fmt.Errorf("server returned transaction without signature")
 	}
 	if json.From != nil && json.BlockHash != nil {
 		setSenderFromServer(json.tx, *json.From, *json.BlockHash)
@@ -285,6 +302,10 @@ func (ec *Client) TransactionReceipt(ctx context.Context, txHash common.Hash) (*
 func toBlockNumArg(number *big.Int) string {
 	if number == nil {
 		return "latest"
+	}
+	pending := big.NewInt(-1)
+	if number.Cmp(pending) == 0 {
+		return "pending"
 	}
 	return hexutil.EncodeBig(number)
 }
@@ -528,11 +549,12 @@ func (ec *Client) SendTransaction(ctx context.Context, tx *types.Transaction, ar
 // Quorum
 //
 // Retrieve encrypted payload hash from the private transaction manager if configured
-func (ec *Client) PreparePrivateTransaction(data []byte, privateFrom string) ([]byte, error) {
+func (ec *Client) PreparePrivateTransaction(data []byte, privateFrom string) (common.EncryptedPayloadHash, error) {
 	if ec.pc == nil {
-		return nil, errors.New("missing private transaction manager client configuration")
+		return common.EncryptedPayloadHash{}, errors.New("missing private transaction manager client configuration")
 	}
-	return ec.pc.storeRaw(data, privateFrom)
+	payLoadHash, err := ec.pc.StoreRaw(data, privateFrom)
+	return payLoadHash, err
 }
 
 func toCallArg(msg ethereum.CallMsg) interface{} {

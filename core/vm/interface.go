@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:generate mockgen -source interface.go -destination mock_interface.go -package vm
+
 package vm
 
 import (
@@ -24,23 +26,47 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
+type AccountExtraDataStateGetter interface {
+	// Return nil for public contract
+	GetPrivacyMetadata(addr common.Address) (*state.PrivacyMetadata, error)
+	GetManagedParties(addr common.Address) ([]string, error)
+}
+
+type AccountExtraDataStateSetter interface {
+	SetPrivacyMetadata(addr common.Address, pm *state.PrivacyMetadata)
+	SetManagedParties(addr common.Address, managedParties []string)
+}
+
 // Quorum uses a cut-down StateDB, MinimalApiState. We leave the methods in StateDB commented out so they'll produce a
 // conflict when upstream changes.
 type MinimalApiState interface {
+	AccountExtraDataStateGetter
+
 	GetBalance(addr common.Address) *big.Int
+	SetBalance(addr common.Address, balance *big.Int)
 	GetCode(addr common.Address) []byte
 	GetState(a common.Address, b common.Hash) common.Hash
 	GetNonce(addr common.Address) uint64
+	SetNonce(addr common.Address, nonce uint64)
+	SetCode(common.Address, []byte)
+
+	// RLP-encoded of the state object in a given address
+	// Throw error if no state object is found
+	GetRLPEncodedStateObject(addr common.Address) ([]byte, error)
 	GetProof(common.Address) ([][]byte, error)
 	GetStorageProof(common.Address, common.Hash) ([][]byte, error)
 	StorageTrie(addr common.Address) state.Trie
 	Error() error
 	GetCodeHash(common.Address) common.Hash
+	SetState(common.Address, common.Hash, common.Hash)
+	SetStorage(addr common.Address, storage map[common.Hash]common.Hash)
 }
 
 // StateDB is an EVM database for full state querying.
 type StateDB interface {
 	MinimalApiState
+	AccountExtraDataStateSetter
+
 	CreateAccount(common.Address)
 
 	SubBalance(common.Address, *big.Int)
@@ -48,11 +74,11 @@ type StateDB interface {
 	//GetBalance(common.Address) *big.Int
 
 	//GetNonce(common.Address) uint64
-	SetNonce(common.Address, uint64)
+	//SetNonce(common.Address, uint64)
 
 	//GetCodeHash(common.Address) common.Hash
 	//GetCode(common.Address) []byte
-	SetCode(common.Address, []byte)
+	//SetCode(common.Address, []byte)
 	GetCodeSize(common.Address) int
 
 	AddRefund(uint64)
@@ -60,7 +86,8 @@ type StateDB interface {
 	GetRefund() uint64
 
 	GetCommittedState(common.Address, common.Hash) common.Hash
-	SetState(common.Address, common.Hash, common.Hash)
+	//GetState(common.Address, common.Hash) common.Hash
+	//SetState(common.Address, common.Hash, common.Hash)
 
 	Suicide(common.Address) bool
 	HasSuicided(common.Address) bool
@@ -78,7 +105,7 @@ type StateDB interface {
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
 
-	ForEachStorage(common.Address, func(common.Hash, common.Hash) bool)
+	ForEachStorage(common.Address, func(common.Hash, common.Hash) bool) error
 }
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM

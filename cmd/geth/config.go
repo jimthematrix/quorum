@@ -20,23 +20,22 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"reflect"
-	"time"
 	"unicode"
 
-	"gopkg.in/urfave/cli.v1"
-
 	"github.com/ethereum/go-ethereum/cmd/utils"
-	"github.com/ethereum/go-ethereum/dashboard"
+	"github.com/ethereum/go-ethereum/common/http"
 	"github.com/ethereum/go-ethereum/eth"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
-	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/raft"
+	"github.com/ethereum/go-ethereum/private"
+	"github.com/ethereum/go-ethereum/private/engine"
 	whisper "github.com/ethereum/go-ethereum/whisper/whisperv6"
 	"github.com/naoina/toml"
+	"gopkg.in/urfave/cli.v1"
 )
 
 var (
@@ -78,11 +77,10 @@ type ethstatsConfig struct {
 }
 
 type gethConfig struct {
-	Eth       eth.Config
-	Shh       whisper.Config
-	Node      node.Config
-	Ethstats  ethstatsConfig
-	Dashboard dashboard.Config
+	Eth      eth.Config
+	Shh      whisper.Config
+	Node     node.Config
+	Ethstats ethstatsConfig
 }
 
 func loadConfig(file string, cfg *gethConfig) error {
@@ -103,20 +101,20 @@ func loadConfig(file string, cfg *gethConfig) error {
 func defaultNodeConfig() node.Config {
 	cfg := node.DefaultConfig
 	cfg.Name = clientIdentifier
-	cfg.Version = params.VersionWithCommit(gitCommit)
-	cfg.HTTPModules = append(cfg.HTTPModules, "eth", "shh")
-	cfg.WSModules = append(cfg.WSModules, "eth", "shh")
+	cfg.Version = params.VersionWithCommit(gitCommit, gitDate)
+	cfg.HTTPModules = append(cfg.HTTPModules, "eth")
+	cfg.WSModules = append(cfg.WSModules, "eth")
 	cfg.IPCPath = "geth.ipc"
 	return cfg
 }
 
+// makeConfigNode loads geth configuration and creates a blank node instance.
 func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	// Load defaults.
 	cfg := gethConfig{
-		Eth:       eth.DefaultConfig,
-		Shh:       whisper.DefaultConfig,
-		Node:      defaultNodeConfig(),
-		Dashboard: dashboard.DefaultConfig,
+		Eth:  eth.DefaultConfig,
+		Shh:  whisper.DefaultConfig,
+		Node: defaultNodeConfig(),
 	}
 
 	// Load config file.
@@ -136,10 +134,7 @@ func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	if ctx.GlobalIsSet(utils.EthStatsURLFlag.Name) {
 		cfg.Ethstats.URL = ctx.GlobalString(utils.EthStatsURLFlag.Name)
 	}
-
 	utils.SetShhConfig(ctx, stack, &cfg.Shh)
-	cfg.Eth.RaftMode = ctx.GlobalBool(utils.RaftModeFlag.Name)
-	utils.SetDashboardConfig(ctx, &cfg.Dashboard)
 
 	return stack, cfg
 }
@@ -154,22 +149,32 @@ func enableWhisper(ctx *cli.Context) bool {
 	return false
 }
 
-func makeFullNode(ctx *cli.Context) *node.Node {
+// makeFullNode loads geth configuration and creates the Ethereum backend.
+func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 	stack, cfg := makeConfigNode(ctx)
 
-	ethChan := utils.RegisterEthService(stack, &cfg.Eth)
+	// Quorum - returning `ethService` too for the Raft and extension service
+	backend, ethService := utils.RegisterEthService(stack, &cfg.Eth)
+
+	// Quorum
+	// plugin service must be after eth service so that eth service will be stopped gradually if any of the plugin
+	// fails to start
+	if cfg.Node.Plugins != nil {
+		utils.RegisterPluginService(stack, &cfg.Node, ctx.Bool(utils.PluginSkipVerifyFlag.Name), ctx.Bool(utils.PluginLocalVerifyFlag.Name), ctx.String(utils.PluginPublicKeyFlag.Name))
+	}
 
 	if cfg.Node.IsPermissionEnabled() {
-		utils.RegisterPermissionService(ctx, stack)
+		utils.RegisterPermissionService(stack, ctx.Bool(utils.RaftDNSEnabledFlag.Name))
 	}
 
 	if ctx.GlobalBool(utils.RaftModeFlag.Name) {
-		RegisterRaftService(stack, ctx, cfg, ethChan)
+		utils.RegisterRaftService(stack, ctx, &cfg.Node, ethService)
 	}
 
-	if ctx.GlobalBool(utils.DashboardEnabledFlag.Name) {
-		utils.RegisterDashboardService(stack, &cfg.Dashboard, gitCommit)
+	if private.IsQuorumPrivacyEnabled() {
+		utils.RegisterExtensionService(stack, ethService)
 	}
+	// End Quorum
 
 	// Whisper must be explicitly enabled by specifying at least 1 whisper flag or in dev mode
 	shhEnabled := enableWhisper(ctx)
@@ -186,12 +191,15 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 		}
 		utils.RegisterShhService(stack, &cfg.Shh)
 	}
-
+	// Configure GraphQL if requested
+	if ctx.GlobalIsSet(utils.GraphQLEnabledFlag.Name) {
+		utils.RegisterGraphQLService(stack, backend, cfg.Node)
+	}
 	// Add the Ethereum Stats daemon if requested.
 	if cfg.Ethstats.URL != "" {
-		utils.RegisterEthStatsService(stack, cfg.Ethstats.URL)
+		utils.RegisterEthStatsService(stack, backend, cfg.Ethstats.URL)
 	}
-	return stack
+	return stack, backend
 }
 
 // dumpConfig is the dumpconfig command.
@@ -208,70 +216,102 @@ func dumpConfig(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	io.WriteString(os.Stdout, comment)
-	os.Stdout.Write(out)
+
+	dump := os.Stdout
+	if ctx.NArg() > 0 {
+		dump, err = os.OpenFile(ctx.Args().Get(0), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			return err
+		}
+		defer dump.Close()
+	}
+	dump.WriteString(comment)
+	dump.Write(out)
+
 	return nil
 }
 
-func RegisterRaftService(stack *node.Node, ctx *cli.Context, cfg gethConfig, ethChan <-chan *eth.Ethereum) {
-	blockTimeMillis := ctx.GlobalInt(utils.RaftBlockTimeFlag.Name)
-	datadir := ctx.GlobalString(utils.DataDirFlag.Name)
-	joinExistingId := ctx.GlobalInt(utils.RaftJoinExistingFlag.Name)
-
-	raftPort := uint16(ctx.GlobalInt(utils.RaftPortFlag.Name))
-
-	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		privkey := cfg.Node.NodeKey()
-		strId := enode.PubkeyToIDV4(&privkey.PublicKey).String()
-		blockTimeNanos := time.Duration(blockTimeMillis) * time.Millisecond
-		peers := cfg.Node.StaticNodes()
-
-		var myId uint16
-		var joinExisting bool
-
-		if joinExistingId > 0 {
-			myId = uint16(joinExistingId)
-			joinExisting = true
-		} else if len(peers) == 0 {
-			utils.Fatalf("Raft-based consensus requires either (1) an initial peers list (in static-nodes.json) including this enode hash (%v), or (2) the flag --raftjoinexisting RAFT_ID, where RAFT_ID has been issued by an existing cluster member calling `raft.addPeer(ENODE_ID)` with an enode ID containing this node's enode hash.", strId)
-		} else {
-			peerIds := make([]string, len(peers))
-
-			for peerIdx, peer := range peers {
-				if !peer.HasRaftPort() {
-					utils.Fatalf("raftport querystring parameter not specified in static-node enode ID: %v. please check your static-nodes.json file.", peer.String())
-				}
-
-				peerId := peer.ID().String()
-				peerIds[peerIdx] = peerId
-				if peerId == strId {
-					myId = uint16(peerIdx) + 1
-				}
-			}
-
-			if myId == 0 {
-				utils.Fatalf("failed to find local enode ID (%v) amongst peer IDs: %v", strId, peerIds)
-			}
-		}
-
-		ethereum := <-ethChan
-		return raft.New(ctx, ethereum.ChainConfig(), myId, raftPort, joinExisting, blockTimeNanos, ethereum, peers, datadir)
-	}); err != nil {
-		utils.Fatalf("Failed to register the Raft service: %v", err)
-	}
-
-}
-
-// quorumValidateConsensus checks if a consensus was used. The node is killed if consensus was not used
-func quorumValidateConsensus(stack *node.Node, isRaft bool) {
+// quorumValidateEthService checks quorum features that depend on the ethereum service
+func quorumValidateEthService(stack *node.Node, isRaft bool) {
 	var ethereum *eth.Ethereum
 
-	err := stack.Service(&ethereum)
+	err := stack.Lifecycle(&ethereum)
 	if err != nil {
 		utils.Fatalf("Error retrieving Ethereum service: %v", err)
 	}
 
-	if !isRaft && ethereum.ChainConfig().Istanbul == nil && ethereum.ChainConfig().Clique == nil {
+	quorumValidateConsensus(ethereum, isRaft)
+
+	quorumValidatePrivacyEnhancements(ethereum)
+}
+
+// quorumValidateConsensus checks if a consensus was used. The node is killed if consensus was not used
+func quorumValidateConsensus(ethereum *eth.Ethereum, isRaft bool) {
+	if !isRaft && ethereum.BlockChain().Config().Istanbul == nil && ethereum.BlockChain().Config().Clique == nil {
 		utils.Fatalf("Consensus not specified. Exiting!!")
 	}
+}
+
+// quorumValidatePrivacyEnhancements checks if privacy enhancements are configured the transaction manager supports
+// the PrivacyEnhancements feature
+func quorumValidatePrivacyEnhancements(ethereum *eth.Ethereum) {
+	privacyEnhancementsBlock := ethereum.BlockChain().Config().PrivacyEnhancementsBlock
+	if privacyEnhancementsBlock != nil {
+		log.Info("Privacy enhancements is configured to be enabled from block ", "height", privacyEnhancementsBlock)
+		if !private.P.HasFeature(engine.PrivacyEnhancements) {
+			utils.Fatalf("Cannot start quorum with privacy enhancements enabled while the transaction manager does not support it")
+		}
+	}
+}
+
+// Get private transaction manager configuration
+func QuorumSetupPrivacyConfiguration(ctx *cli.Context) (http.Config, error) {
+	// get default configuration
+	cfg, err := private.GetLegacyEnvironmentConfig()
+	if err != nil {
+		return http.Config{}, err
+	}
+
+	// override the config with command line parameters
+	if ctx.GlobalIsSet(utils.QuorumPTMUnixSocketFlag.Name) {
+		cfg.SetSocket(ctx.GlobalString(utils.QuorumPTMUnixSocketFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMUrlFlag.Name) {
+		cfg.SetHttpUrl(ctx.GlobalString(utils.QuorumPTMUrlFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMTimeoutFlag.Name) {
+		cfg.SetTimeout(ctx.GlobalUint(utils.QuorumPTMTimeoutFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMDialTimeoutFlag.Name) {
+		cfg.SetDialTimeout(ctx.GlobalUint(utils.QuorumPTMDialTimeoutFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMHttpIdleTimeoutFlag.Name) {
+		cfg.SetHttpIdleConnTimeout(ctx.GlobalUint(utils.QuorumPTMHttpIdleTimeoutFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMHttpWriteBufferSizeFlag.Name) {
+		cfg.SetHttpWriteBufferSize(ctx.GlobalInt(utils.QuorumPTMHttpWriteBufferSizeFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMHttpReadBufferSizeFlag.Name) {
+		cfg.SetHttpReadBufferSize(ctx.GlobalInt(utils.QuorumPTMHttpReadBufferSizeFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMTlsModeFlag.Name) {
+		cfg.SetTlsMode(ctx.GlobalString(utils.QuorumPTMTlsModeFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMTlsRootCaFlag.Name) {
+		cfg.SetTlsRootCA(ctx.GlobalString(utils.QuorumPTMTlsRootCaFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMTlsClientCertFlag.Name) {
+		cfg.SetTlsClientCert(ctx.GlobalString(utils.QuorumPTMTlsClientCertFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMTlsClientKeyFlag.Name) {
+		cfg.SetTlsClientKey(ctx.GlobalString(utils.QuorumPTMTlsClientKeyFlag.Name))
+	}
+	if ctx.GlobalIsSet(utils.QuorumPTMTlsInsecureSkipVerify.Name) {
+		cfg.SetTlsInsecureSkipVerify(ctx.Bool(utils.QuorumPTMTlsInsecureSkipVerify.Name))
+	}
+
+	if err = cfg.Validate(); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
 }

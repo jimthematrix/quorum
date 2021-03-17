@@ -56,8 +56,10 @@ services:
   faucet:
     build: .
     image: {{.Network}}/faucet
+    container_name: {{.Network}}_faucet_1
     ports:
-      - "{{.EthPort}}:{{.EthPort}}"{{if not .VHost}}
+      - "{{.EthPort}}:{{.EthPort}}"
+      - "{{.EthPort}}:{{.EthPort}}/udp"{{if not .VHost}}
       - "{{.ApiPort}}:8080"{{end}}
     volumes:
       - {{.Datadir}}:/root/.faucet
@@ -211,7 +213,7 @@ func checkFaucet(client *sshClient, network string) (*faucetInfos, error) {
 	minutes, _ := strconv.Atoi(infos.envvars["FAUCET_MINUTES"])
 	tiers, _ := strconv.Atoi(infos.envvars["FAUCET_TIERS"])
 
-	// Retrieve the funding account informations
+	// Retrieve the funding account information
 	var out []byte
 	keyJSON, keyPass := "", ""
 	if out, err = client.Run(fmt.Sprintf("docker exec %s_faucet_1 cat /account.json", network)); err == nil {

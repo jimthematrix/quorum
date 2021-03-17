@@ -24,15 +24,19 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/bloombits"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/multitenancy"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type Backend interface {
+	multitenancy.AuthorizationProvider
+
 	ChainDb() ethdb.Database
-	EventMux() *event.TypeMux
 	HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error)
 	HeaderByHash(ctx context.Context, blockHash common.Hash) (*types.Header, error)
 	GetReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, error)
@@ -42,9 +46,13 @@ type Backend interface {
 	SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription
 	SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription
 	SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription
+	SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription
 
 	BloomStatus() (uint64, uint64)
 	ServiceFilter(ctx context.Context, session *bloombits.MatcherSession)
+
+	// AccountExtraDataStateGetterByNumber returns state getter at a given block height
+	AccountExtraDataStateGetterByNumber(ctx context.Context, number rpc.BlockNumber) (vm.AccountExtraDataStateGetter, error)
 }
 
 // Filter can be used to retrieve and filter logs.
@@ -210,34 +218,32 @@ func (f *Filter) indexedLogs(ctx context.Context, end uint64) ([]*types.Log, err
 	}
 }
 
-// indexedLogs returns the logs matching the filter criteria based on raw block
+// unindexedLogs returns the logs matching the filter criteria based on raw block
 // iteration and bloom matching.
 func (f *Filter) unindexedLogs(ctx context.Context, end uint64) ([]*types.Log, error) {
 	var logs []*types.Log
 
 	for ; f.begin <= int64(end); f.begin++ {
-		blockNumber := rpc.BlockNumber(f.begin)
 		header, err := f.backend.HeaderByNumber(ctx, rpc.BlockNumber(f.begin))
 		if header == nil || err != nil {
 			return logs, err
 		}
-
-		bloomMatches := bloomFilter(header.Bloom, f.addresses, f.topics) ||
-			bloomFilter(core.GetPrivateBlockBloom(f.db, uint64(blockNumber)), f.addresses, f.topics)
-		if bloomMatches {
-			found, err := f.checkMatches(ctx, header)
-			if err != nil {
-				return logs, err
-			}
-			logs = append(logs, found...)
+		found, err := f.blockLogs(ctx, header)
+		if err != nil {
+			return logs, err
 		}
+		logs = append(logs, found...)
 	}
 	return logs, nil
 }
 
 // blockLogs returns the logs matching the filter criteria within a single block.
 func (f *Filter) blockLogs(ctx context.Context, header *types.Header) (logs []*types.Log, err error) {
-	if bloomFilter(header.Bloom, f.addresses, f.topics) {
+	// Quorum
+	// Apply bloom filter for both public bloom and private bloom
+	bloomMatches := bloomFilter(header.Bloom, f.addresses, f.topics) ||
+		bloomFilter(rawdb.GetPrivateBlockBloom(f.db, header.Number.Uint64()), f.addresses, f.topics)
+	if bloomMatches {
 		found, err := f.checkMatches(ctx, header)
 		if err != nil {
 			return logs, err

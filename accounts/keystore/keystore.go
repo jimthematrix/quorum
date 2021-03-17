@@ -24,8 +24,6 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"errors"
-	"fmt"
-	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -39,12 +37,17 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 var (
 	ErrLocked  = accounts.NewAuthNeededError("password or unlock")
 	ErrNoMatch = errors.New("no key for given address or file")
-	ErrDecrypt = errors.New("could not decrypt key with given passphrase")
+	ErrDecrypt = errors.New("could not decrypt key with given password")
+
+	// ErrAccountAlreadyExists is returned if an account attempted to import is
+	// already present in the keystore.
+	ErrAccountAlreadyExists = errors.New("account already exists")
 )
 
 // KeyStoreType is the reflect type of a keystore backend.
@@ -68,7 +71,8 @@ type KeyStore struct {
 	updateScope event.SubscriptionScope // Subscription scope tracking current live listeners
 	updating    bool                    // Whether the event notification loop is running
 
-	mu sync.RWMutex
+	mu       sync.RWMutex
+	importMu sync.Mutex // Import Mutex locks the import to prevent two insertions from racing
 }
 
 type unlocked struct {
@@ -138,8 +142,10 @@ func (ks *KeyStore) refreshWallets() {
 	accs := ks.cache.accounts()
 
 	// Transform the current list of wallets into the new one
-	wallets := make([]accounts.Wallet, 0, len(accs))
-	events := []accounts.WalletEvent{}
+	var (
+		wallets = make([]accounts.Wallet, 0, len(accs))
+		events  []accounts.WalletEvent
+	)
 
 	for _, account := range accs {
 		// Drop wallets while they were in front of the next account
@@ -452,14 +458,27 @@ func (ks *KeyStore) Import(keyJSON []byte, passphrase, newPassphrase string) (ac
 	if err != nil {
 		return accounts.Account{}, err
 	}
+	ks.importMu.Lock()
+	defer ks.importMu.Unlock()
+
+	if ks.cache.hasAddress(key.Address) {
+		return accounts.Account{
+			Address: key.Address,
+		}, ErrAccountAlreadyExists
+	}
 	return ks.importKey(key, newPassphrase)
 }
 
 // ImportECDSA stores the given key into the key directory, encrypting it with the passphrase.
 func (ks *KeyStore) ImportECDSA(priv *ecdsa.PrivateKey, passphrase string) (accounts.Account, error) {
+	ks.importMu.Lock()
+	defer ks.importMu.Unlock()
+
 	key := newKeyFromECDSA(priv)
 	if ks.cache.hasAddress(key.Address) {
-		return accounts.Account{}, fmt.Errorf("account already exists")
+		return accounts.Account{
+			Address: key.Address,
+		}, ErrAccountAlreadyExists
 	}
 	return ks.importKey(key, passphrase)
 }

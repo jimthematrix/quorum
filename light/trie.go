@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -30,7 +31,7 @@ import (
 )
 
 func NewState(ctx context.Context, head *types.Header, odr OdrBackend) *state.StateDB {
-	state, _ := state.New(head.Root, NewStateDatabase(ctx, head, odr))
+	state, _ := state.New(head.Root, NewStateDatabase(ctx, head, odr), nil)
 	return state
 }
 
@@ -67,10 +68,11 @@ func (db *odrDatabase) CopyTrie(t state.Trie) state.Trie {
 }
 
 func (db *odrDatabase) ContractCode(addrHash, codeHash common.Hash) ([]byte, error) {
-	if codeHash == sha3_nil {
+	if codeHash == sha3Nil {
 		return nil, nil
 	}
-	if code, err := db.backend.Database().Get(codeHash[:]); err == nil {
+	code := rawdb.ReadCode(db.backend.Database(), codeHash)
+	if len(code) != 0 {
 		return code, nil
 	}
 	id := *db.id
@@ -87,6 +89,25 @@ func (db *odrDatabase) ContractCodeSize(addrHash, codeHash common.Hash) (int, er
 
 func (db *odrDatabase) TrieDB() *trie.Database {
 	return nil
+}
+
+type stubAccountExtraDataLinker struct {
+}
+
+func newAccountExtraDataLinkerStub() rawdb.AccountExtraDataLinker {
+	return &stubAccountExtraDataLinker{}
+}
+
+func (pml *stubAccountExtraDataLinker) GetAccountExtraDataRoot(_ common.Hash) common.Hash {
+	return common.Hash{}
+}
+
+func (pml *stubAccountExtraDataLinker) Link(_, _ common.Hash) error {
+	return nil
+}
+
+func (db *odrDatabase) AccountExtraDataLinker() rawdb.AccountExtraDataLinker {
+	return newAccountExtraDataLinkerStub()
 }
 
 type odrTrie struct {
@@ -108,7 +129,7 @@ func (t *odrTrie) TryGet(key []byte) ([]byte, error) {
 func (t *odrTrie) TryUpdate(key, value []byte) error {
 	key = crypto.Keccak256(key)
 	return t.do(key, func() error {
-		return t.trie.TryDelete(key)
+		return t.trie.TryUpdate(key, value)
 	})
 }
 
@@ -141,7 +162,7 @@ func (t *odrTrie) GetKey(sha []byte) []byte {
 	return nil
 }
 
-func (t *odrTrie) Prove(key []byte, fromLevel uint, proofDb ethdb.Putter) error {
+func (t *odrTrie) Prove(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter) error {
 	return errors.New("not implemented, needs client/server interface split")
 }
 

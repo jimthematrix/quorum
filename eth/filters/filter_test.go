@@ -29,8 +29,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -51,18 +49,13 @@ func BenchmarkFilters(b *testing.B) {
 	defer os.RemoveAll(dir)
 
 	var (
-		db, _      = ethdb.NewLDBDatabase(dir, 0, 0)
-		mux        = new(event.TypeMux)
-		txFeed     = new(event.Feed)
-		rmLogsFeed = new(event.Feed)
-		logsFeed   = new(event.Feed)
-		chainFeed  = new(event.Feed)
-		backend    = &testBackend{mux, db, 0, txFeed, rmLogsFeed, logsFeed, chainFeed}
-		key1, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		addr1      = crypto.PubkeyToAddress(key1.PublicKey)
-		addr2      = common.BytesToAddress([]byte("jeff"))
-		addr3      = common.BytesToAddress([]byte("ethereum"))
-		addr4      = common.BytesToAddress([]byte("random addresses please"))
+		db, _   = rawdb.NewLevelDBDatabase(dir, 0, 0, "")
+		backend = &testBackend{db: db}
+		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
+		addr2   = common.BytesToAddress([]byte("jeff"))
+		addr3   = common.BytesToAddress([]byte("ethereum"))
+		addr4   = common.BytesToAddress([]byte("random addresses please"))
 	)
 	defer db.Close()
 
@@ -110,20 +103,16 @@ func TestFilters(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	var (
-		db, _      = ethdb.NewLDBDatabase(dir, 0, 0)
-		mux        = new(event.TypeMux)
-		txFeed     = new(event.Feed)
-		rmLogsFeed = new(event.Feed)
-		logsFeed   = new(event.Feed)
-		chainFeed  = new(event.Feed)
-		backend    = &testBackend{mux, db, 0, txFeed, rmLogsFeed, logsFeed, chainFeed}
-		key1, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		addr       = crypto.PubkeyToAddress(key1.PublicKey)
+		db, _   = rawdb.NewLevelDBDatabase(dir, 0, 0, "")
+		backend = &testBackend{db: db}
+		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		addr    = crypto.PubkeyToAddress(key1.PublicKey)
 
 		hash1 = common.BytesToHash([]byte("topic1"))
 		hash2 = common.BytesToHash([]byte("topic2"))
 		hash3 = common.BytesToHash([]byte("topic3"))
 		hash4 = common.BytesToHash([]byte("topic4"))
+		hash5 = common.BytesToHash([]byte("privateTopic"))
 	)
 	defer db.Close()
 
@@ -139,6 +128,7 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
+			gen.AddUncheckedTx(types.NewTransaction(1, common.HexToAddress("0x1"), big.NewInt(1), 1, big.NewInt(1), nil))
 		case 2:
 			receipt := types.NewReceipt(nil, false, 0)
 			receipt.Logs = []*types.Log{
@@ -148,6 +138,8 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
+			gen.AddUncheckedTx(types.NewTransaction(2, common.HexToAddress("0x2"), big.NewInt(2), 2, big.NewInt(2), nil))
+
 		case 998:
 			receipt := types.NewReceipt(nil, false, 0)
 			receipt.Logs = []*types.Log{
@@ -157,6 +149,20 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
+			gen.AddUncheckedTx(types.NewTransaction(998, common.HexToAddress("0x998"), big.NewInt(998), 998, big.NewInt(998), nil))
+			// Add pseudo Quorum private transaction
+			privateReceipt := types.NewReceipt(nil, false, 0)
+			privateReceipt.Logs = []*types.Log{
+				{
+					Address: addr,
+					Topics:  []common.Hash{hash5},
+				},
+			}
+			if err := rawdb.WritePrivateBlockBloom(db, 999, []*types.Receipt{privateReceipt}); err != nil {
+				t.Fatal(err)
+			}
+			gen.AddUncheckedReceipt(privateReceipt)
+			gen.AddUncheckedTx(types.NewTransaction(998, common.HexToAddress("0x998"), big.NewInt(998), 998, big.NewInt(998), nil))
 		case 999:
 			receipt := types.NewReceipt(nil, false, 0)
 			receipt.Logs = []*types.Log{
@@ -166,6 +172,7 @@ func TestFilters(t *testing.T) {
 				},
 			}
 			gen.AddUncheckedReceipt(receipt)
+			gen.AddUncheckedTx(types.NewTransaction(999, common.HexToAddress("0x999"), big.NewInt(999), 999, big.NewInt(999), nil))
 		}
 	})
 	for i, block := range chain {
@@ -229,4 +236,26 @@ func TestFilters(t *testing.T) {
 	if len(logs) != 0 {
 		t.Error("expected 0 log, got", len(logs))
 	}
+
+	// Quorum
+
+	// Test individual private log with NewBlockFilter (query filter with block hash)
+	filter = NewBlockFilter(backend, chain[998].Hash(), nil, [][]common.Hash{{hash5}})
+
+	logs, _ = filter.Logs(context.Background())
+	if len(logs) != 1 {
+		t.Error("expected 1 log, got", len(logs))
+	}
+	if len(logs) > 0 && logs[0].Topics[0] != hash5 {
+		t.Errorf("expected log[0].Topics[0] to be %x, got %x", hash5, logs[0].Topics[0])
+	}
+
+	// Test a mix of public and private logs with NewBlockFilter (query filter with block hash)
+	filter = NewBlockFilter(backend, chain[998].Hash(), nil, [][]common.Hash{{hash3, hash5}})
+
+	logs, _ = filter.Logs(context.Background())
+	if len(logs) != 2 {
+		t.Error("expected 2 log, got", len(logs))
+	}
+
 }

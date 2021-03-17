@@ -35,7 +35,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
@@ -62,6 +61,7 @@ func (api *PublicEthereumAPI) Coinbase() (common.Address, error) {
 	return api.Etherbase()
 }
 
+// Quorum
 // StorageRoot returns the storage root of an account on the the given (optional) block height.
 // If block number is not given the latest block is used.
 func (s *PublicEthereumAPI) StorageRoot(addr common.Address, blockNr *rpc.BlockNumber) (common.Hash, error) {
@@ -98,7 +98,7 @@ func (api *PublicEthereumAPI) Hashrate() hexutil.Uint64 {
 // ChainId is the EIP-155 replay-protection chain id for the current ethereum chain config.
 func (api *PublicEthereumAPI) ChainId() hexutil.Uint64 {
 	chainID := new(big.Int)
-	if config := api.e.chainConfig; config.IsEIP155(api.e.blockchain.CurrentBlock().Number()) {
+	if config := api.e.blockchain.Config(); config.IsEIP155(api.e.blockchain.CurrentBlock().Number()) {
 		chainID = config.ChainID
 	}
 	return (hexutil.Uint64)(chainID.Uint64())
@@ -195,8 +195,21 @@ func NewPrivateAdminAPI(eth *Ethereum) *PrivateAdminAPI {
 	return &PrivateAdminAPI{eth: eth}
 }
 
-// ExportChain exports the current blockchain into a local file.
-func (api *PrivateAdminAPI) ExportChain(file string) (bool, error) {
+// ExportChain exports the current blockchain into a local file,
+// or a range of blocks if first and last are non-nil
+func (api *PrivateAdminAPI) ExportChain(file string, first *uint64, last *uint64) (bool, error) {
+	if first == nil && last != nil {
+		return false, errors.New("last cannot be specified without first")
+	}
+	if first != nil && last == nil {
+		head := api.eth.BlockChain().CurrentHeader().Number.Uint64()
+		last = &head
+	}
+	if _, err := os.Stat(file); err == nil {
+		// File already exists. Allowing overwrite could be a DoS vecotor,
+		// since the 'file' may point to arbitrary paths on the drive
+		return false, errors.New("location would overwrite an existing file")
+	}
 	// Make sure we can create the file to export into
 	out, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
@@ -211,7 +224,11 @@ func (api *PrivateAdminAPI) ExportChain(file string) (bool, error) {
 	}
 
 	// Export the blockchain
-	if err := api.eth.BlockChain().Export(writer); err != nil {
+	if first != nil {
+		if err := api.eth.BlockChain().ExportN(writer, *first, *last); err != nil {
+			return false, err
+		}
+	} else if err := api.eth.BlockChain().Export(writer); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -289,51 +306,79 @@ func NewPublicDebugAPI(eth *Ethereum) *PublicDebugAPI {
 }
 
 // DumpBlock retrieves the entire state of the database at a given block.
-func (api *PublicDebugAPI) DumpBlock(blockNr rpc.BlockNumber, typ string) (state.Dump, error) {
-	var publicState, privateState *state.StateDB
-	var err error
+// Quorum adds an additional parameter to support private state dump
+func (api *PublicDebugAPI) DumpBlock(blockNr rpc.BlockNumber, typ *string) (state.Dump, error) {
+	publicState, privateState, err := api.getStateDbsFromBlockNumber(blockNr)
+	if err != nil {
+		return state.Dump{}, err
+	}
+
+	if typ != nil && *typ == "private" {
+		return privateState.RawDump(false, false, true), nil
+	}
+	return publicState.RawDump(false, false, true), nil
+}
+
+func (api *PublicDebugAPI) PrivateStateRoot(ctx context.Context, blockNr rpc.BlockNumber) (common.Hash, error) {
+	_, privateState, err := api.getStateDbsFromBlockNumber(blockNr)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return privateState.IntermediateRoot(true), nil
+}
+
+// Quorum
+// DumpAddress retrieves the state of an address at a given block.
+// Quorum adds an additional parameter to support private state dump
+func (api *PublicDebugAPI) DumpAddress(address common.Address, blockNr rpc.BlockNumber) (state.DumpAccount, error) {
+	publicState, privateState, err := api.getStateDbsFromBlockNumber(blockNr)
+	if err != nil {
+		return state.DumpAccount{}, err
+	}
+
+	if accountDump, ok := privateState.DumpAddress(address); ok {
+		return accountDump, nil
+	}
+	if accountDump, ok := publicState.DumpAddress(address); ok {
+		return accountDump, nil
+	}
+	return state.DumpAccount{}, errors.New("error retrieving state")
+}
+
+//Quorum
+//Taken from DumpBlock, as it was reused in DumpAddress.
+//Contains modifications from the original to return the private state db, as well as public.
+func (api *PublicDebugAPI) getStateDbsFromBlockNumber(blockNr rpc.BlockNumber) (*state.StateDB, *state.StateDB, error) {
 	if blockNr == rpc.PendingBlockNumber {
 		// If we're dumping the pending state, we need to request
 		// both the pending block as well as the pending state from
 		// the miner and operate on those
-		_, publicState, privateState = api.eth.miner.Pending()
-	} else {
-		var block *types.Block
-		if blockNr == rpc.LatestBlockNumber {
-			block = api.eth.blockchain.CurrentBlock()
-		} else {
-			block = api.eth.blockchain.GetBlockByNumber(uint64(blockNr))
-		}
-		if block == nil {
-			return state.Dump{}, fmt.Errorf("block #%d not found", blockNr)
-		}
-		publicState, privateState, err = api.eth.BlockChain().StateAt(block.Root())
-		if err != nil {
-			return state.Dump{}, err
-		}
+		_, publicState, privateState := api.eth.miner.Pending()
+		return publicState, privateState, nil
 	}
 
-	switch typ {
-	case "public":
-		return publicState.RawDump(), nil
-	case "private":
-		return privateState.RawDump(), nil
-	default:
-		return state.Dump{}, fmt.Errorf("unknown type: '%s'", typ)
+	var block *types.Block
+	if blockNr == rpc.LatestBlockNumber {
+		block = api.eth.blockchain.CurrentBlock()
+	} else {
+		block = api.eth.blockchain.GetBlockByNumber(uint64(blockNr))
 	}
+	if block == nil {
+		return nil, nil, fmt.Errorf("block #%d not found", blockNr)
+	}
+	return api.eth.BlockChain().StateAt(block.Root())
 }
 
 // PrivateDebugAPI is the collection of Ethereum full node APIs exposed over
 // the private debugging endpoint.
 type PrivateDebugAPI struct {
-	config *params.ChainConfig
-	eth    *Ethereum
+	eth *Ethereum
 }
 
 // NewPrivateDebugAPI creates a new API definition for the full node-related
 // private debug methods of the Ethereum service.
-func NewPrivateDebugAPI(config *params.ChainConfig, eth *Ethereum) *PrivateDebugAPI {
-	return &PrivateDebugAPI{config: config, eth: eth}
+func NewPrivateDebugAPI(eth *Ethereum) *PrivateDebugAPI {
+	return &PrivateDebugAPI{eth: eth}
 }
 
 // Preimage is a debug API function that returns the preimage for a sha3 hash, if known.
@@ -374,6 +419,52 @@ func (api *PrivateDebugAPI) GetBadBlocks(ctx context.Context) ([]*BadBlockArgs, 
 	return results, nil
 }
 
+// AccountRangeMaxResults is the maximum number of results to be returned per call
+const AccountRangeMaxResults = 256
+
+// AccountRangeAt enumerates all accounts in the given block and start point in paging request
+func (api *PublicDebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage, incompletes bool) (state.IteratorDump, error) {
+	var stateDb *state.StateDB
+	var err error
+
+	if number, ok := blockNrOrHash.Number(); ok {
+		if number == rpc.PendingBlockNumber {
+			// If we're dumping the pending state, we need to request
+			// both the pending block as well as the pending state from
+			// the miner and operate on those
+			_, stateDb, _ = api.eth.miner.Pending()
+		} else {
+			var block *types.Block
+			if number == rpc.LatestBlockNumber {
+				block = api.eth.blockchain.CurrentBlock()
+			} else {
+				block = api.eth.blockchain.GetBlockByNumber(uint64(number))
+			}
+			if block == nil {
+				return state.IteratorDump{}, fmt.Errorf("block #%d not found", number)
+			}
+			stateDb, _, err = api.eth.BlockChain().StateAt(block.Root())
+			if err != nil {
+				return state.IteratorDump{}, err
+			}
+		}
+	} else if hash, ok := blockNrOrHash.Hash(); ok {
+		block := api.eth.blockchain.GetBlockByHash(hash)
+		if block == nil {
+			return state.IteratorDump{}, fmt.Errorf("block %s not found", hash.Hex())
+		}
+		stateDb, _, err = api.eth.BlockChain().StateAt(block.Root())
+		if err != nil {
+			return state.IteratorDump{}, err
+		}
+	}
+
+	if maxResults > AccountRangeMaxResults || maxResults <= 0 {
+		maxResults = AccountRangeMaxResults
+	}
+	return stateDb.IteratorDump(nocode, nostorage, incompletes, start, maxResults), nil
+}
+
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
 type StorageRangeResult struct {
 	Storage storageMap   `json:"storage"`
@@ -388,8 +479,8 @@ type storageEntry struct {
 }
 
 // StorageRangeAt returns the storage at the given block height and transaction index.
-func (api *PrivateDebugAPI) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	_, _, _, statedb, err := api.computeTxEnv(blockHash, txIndex, 0)
+func (api *PrivateDebugAPI) StorageRangeAt(blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
+	_, _, statedb, _, err := api.computeTxEnv(blockHash, txIndex, 0)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -482,16 +573,17 @@ func (api *PrivateDebugAPI) getModifiedAccounts(startBlock, endBlock *types.Bloc
 	if startBlock.Number().Uint64() >= endBlock.Number().Uint64() {
 		return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", startBlock.Number().Uint64(), endBlock.Number().Uint64())
 	}
+	statedb, _ := api.eth.BlockChain().StateCache()
+	triedb := statedb.TrieDB()
 
-	oldTrie, err := trie.NewSecure(startBlock.Root(), trie.NewDatabase(api.eth.chainDb), 0)
+	oldTrie, err := trie.NewSecure(startBlock.Root(), triedb)
 	if err != nil {
 		return nil, err
 	}
-	newTrie, err := trie.NewSecure(endBlock.Root(), trie.NewDatabase(api.eth.chainDb), 0)
+	newTrie, err := trie.NewSecure(endBlock.Root(), triedb)
 	if err != nil {
 		return nil, err
 	}
-
 	diff, _ := trie.NewDifferenceIterator(oldTrie.NodeIterator([]byte{}), newTrie.NodeIterator([]byte{}))
 	iter := trie.NewIterator(diff)
 
